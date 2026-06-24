@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp"
+    android:background="@color/card_background">
+
+    <!-- Header -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="New Collection"
+        android:textColor="@color/text_dark"
+        android:textSize="30sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Choose an icon and give it a name"
+        android:textColor="@color/text_mid"
+        android:textSize="12sp"
+        android:layout_marginBottom="20dp"/>
+
+    <!-- Icon input -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ICON"
+        android:textColor="@color/text_mid"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="6dp"/>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:background="@drawable/data_background"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:layout_marginBottom="0dp">
+
+        <EditText
+            android:id="@+id/et_collection_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@null"
+            android:hint="Icon..."
+            android:textColorHint="@color/text_light"
+            android:textColor="@color/text_dark"
+            android:textSize="15sp"
+            android:inputType="text"
+            android:maxLength="4"
+            android:singleLine="true"/>
+    </LinearLayout>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Type or pick below..."
+        android:textColor="@color/text_light"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="10dp"/>
+    <!-- Quick pick label -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="QUICK PICK"
+        android:textColor="@color/text_mid"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="6dp"/>
+
+    <!-- Emoji scroll row -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:layout_marginBottom="20dp">
+
+        <LinearLayout
+            android:id="@+id/ll_emoji_row"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"/>
+    </HorizontalScrollView>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider_color"
+        android:layout_marginBottom="20dp"/>
+
+    <!-- Name input -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="NAME"
+        android:textColor="@color/text_mid"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="6dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:background="@drawable/data_background"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:layout_marginBottom="20dp">
+
+        <EditText
+            android:id="@+id/et_collection_name"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@null"
+            android:hint="e.g. Favourite Restaurants"
+            android:textColorHint="@color/text_light"
+            android:textColor="@color/text_dark"
+            android:textSize="14sp"
+            android:inputType="textCapSentences"
+            android:singleLine="true"/>
+    </LinearLayout>
+
+    <!-- Buttons row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_dialog_cancel"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Cancel"
+            android:textColor="@color/text_mid"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:background="@drawable/data_background"
+            android:layout_marginEnd="8dp"/>
+
+        <TextView
+            android:id="@+id/btn_dialog_create"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Create"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:background="@drawable/rounded_bg"/>
+
+    </LinearLayout>
+
+</LinearLayout>
