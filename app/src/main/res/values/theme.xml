@@ -1,0 +1,26 @@
+<resources>
+    <style name="Theme.GPS_Tracker" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#00BCD4</item>
+        <item name="colorPrimaryDark">#0097A7</item>
+        <item name="colorPrimaryVariant">#0097A7</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">#00c99d</item>
+        <item name="colorSecondaryVariant">#00ACC1</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+        <item name="android:colorBackground">#F0FDFE</item>
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorOnSurface">#1E293B</item>
+        <item name="android:statusBarColor">#0097A7</item>
+        <item name="android:navigationBarColor">#0097A7</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="tabStyle">@style/TealTabStyle</item>
+    </style>
+
+    <style name="TealTabStyle" parent="Widget.MaterialComponents.TabLayout">
+        <item name="android:background">#0097A7</item>
+        <item name="tabTextColor">#80FFFFFF</item>
+        <item name="tabSelectedTextColor">@android:color/white</item>
+        <item name="tabIndicatorColor">@android:color/white</item>
+        <item name="tabIndicatorHeight">3dp</item>
+    </style>
+</resources>

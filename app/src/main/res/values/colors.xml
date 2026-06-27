@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="card_background">#FFFFFF</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-</resources>
+    <color name="teal_primary">#00d48d</color>
+    <color name="teal_dark">#00a77d</color>
+    <color name="teal_light">#e0faf0</color>
+    <color name="teal_accent">#00c98d</color>
+    <color name="teal_mint">#ccffed</color>
+    <color name="text_dark">#1e3b38</color>
+    <color name="text_mid">#64748B</color>
+    <color name="text_light">#a2dbd0</color>
+    <color name="bg_page">#F0FDFE</color>
+    <color name="data_background_color">#e1fcf8</color>
+    <color name="btn_background_color">#a7fae8</color>
+    <color name="switch_background_color">#E0F7FA</color>
+    <color name="address_background_color">#E0F7FA</color>
+    <color name="saved_address_color">#b2f2e9</color>
+    <color name="divider_color">#e2eff0</color>
+    <color name="collection_icon">#e1eded</color>
+    </resources>

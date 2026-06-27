@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">MyWay</string>
+    <string name="app_name">GPS_Tracker</string>
+    <string name="title_activity_maps">MapsActivity</string>
+    <string name="google_maps_key">AIzaSyCfV5Mv8_dJMUu1pLgJmalC4yRRCLwqcKU</string>
 </resources>

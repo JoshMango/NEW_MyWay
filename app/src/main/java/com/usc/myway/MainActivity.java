@@ -1,4 +1,4 @@
-package ph.edu.gps_tracker;
+package com.usc.myway;
 
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
