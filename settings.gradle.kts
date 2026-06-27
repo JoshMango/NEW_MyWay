@@ -21,4 +21,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "MyWay"
 include(":app")
- 

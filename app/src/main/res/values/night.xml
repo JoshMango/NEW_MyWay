@@ -1,14 +1,2 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="card_background">#1E293B</color>
-    <color name="bg_page">#0F172A</color>
-    <color name="data_background_color">#1E3A4A</color>
-    <color name="switch_background_color">#1E3A4A</color>
-    <color name="address_background_color">#1E3A4A</color>
-    <color name="saved_address_color">#164E63</color>
-    <color name="text_dark">#F1F5F9</color>
-    <color name="text_mid">#94A3B8</color>
-    <color name="text_light">#92dae8</color>
-    <color name="collection_icon">#27374a</color>
-    <color name="divider_color">#334155</color>
 </resources>

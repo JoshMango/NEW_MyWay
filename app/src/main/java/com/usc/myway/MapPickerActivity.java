@@ -1,4 +1,3 @@
-// logic for picking locations/add pins on map
 package com.usc.myway;
 
 import android.content.Intent;
@@ -16,6 +15,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -43,17 +43,14 @@ import java.util.List;
 public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCallback {
 
     private GoogleMap mMap;
-    private GoogleMap mainMap;
-    private boolean mapReady = false;
     private Marker currentMarker;
     private LatLng pickedLatLng;
     private String pickedAddress = "";
-    private String mode = "address"; // "address" or "waypoint"
-    private String selectedCollectionName = null;
+    private String mode = "address"; 
 
-    private TextView tv_coords, tv_address, btn_save, tv_selected_collection;
+    private TextView tv_coords, tv_address, btn_save;
     private EditText et_name, et_notes;
-    private LinearLayout layout_waypoint_inputs, btn_add_to_collection;
+    private LinearLayout layout_waypoint_inputs;
 
     private PlacesClient pickerPlacesClient;
     private final List<AutocompletePrediction> pickerPredictions = new ArrayList<>();
@@ -75,11 +72,8 @@ public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCa
         et_name                = findViewById(R.id.et_waypoint_name);
         et_notes               = findViewById(R.id.et_waypoint_notes);
         layout_waypoint_inputs = findViewById(R.id.layout_waypoint_inputs);
-        btn_add_to_collection  = findViewById(R.id.btn_add_to_collection);
-        tv_selected_collection = findViewById(R.id.tv_selected_collection);
 
-        // Show name/notes inputs only in waypoint mode
-        if (mode.equals("waypoint")) {
+        if ("waypoint".equals(mode)) {
             layout_waypoint_inputs.setVisibility(View.VISIBLE);
             btn_save.setText("Save Waypoint");
         } else {
@@ -96,11 +90,9 @@ public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCa
         if (mapFragment != null) mapFragment.getMapAsync(this);
 
         btn_save.setOnClickListener(v -> returnResult());
-
-        btn_add_to_collection.setOnClickListener(v -> showCollectionPicker());
-
         setupPickerSearch();
     }
+
     private void setupPickerSearch() {
         if (!Places.isInitialized()) {
             Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
@@ -115,136 +107,67 @@ public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCa
                 this, R.layout.item_autocomplete, R.id.tv_place_name, new ArrayList<>()) {
             @NonNull
             @Override
-            public View getView(int pos, View convertView, @NonNull ViewGroup parent) {
-                if (convertView == null)
-                    convertView = LayoutInflater.from(getContext())
-                            .inflate(R.layout.item_autocomplete, parent, false);
+            public View getView(int pos, View v, @NonNull ViewGroup p) {
+                if (v == null) v = LayoutInflater.from(getContext()).inflate(R.layout.item_autocomplete, p, false);
                 if (pos < pickerPredictions.size()) {
-                    AutocompletePrediction p = pickerPredictions.get(pos);
-                    ((TextView) convertView.findViewById(R.id.tv_place_name))
-                            .setText(p.getPrimaryText(null).toString());
-                    ((TextView) convertView.findViewById(R.id.tv_place_address))
-                            .setText(p.getSecondaryText(null).toString());
+                    AutocompletePrediction pred = pickerPredictions.get(pos);
+                    ((TextView) v.findViewById(R.id.tv_place_name)).setText(pred.getPrimaryText(null));
+                    ((TextView) v.findViewById(R.id.tv_place_address)).setText(pred.getSecondaryText(null));
                 }
-                return convertView;
+                return v;
             }
             @Override public int getCount() { return pickerPredictions.size(); }
         };
         lv_picker_autocomplete.setAdapter(adapter);
 
-        TextWatcher watcher = new TextWatcher() {
+        et_picker_search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void afterTextChanged(Editable s) {}
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                String query = s.toString().trim();
-                btn_picker_clear.setVisibility(query.isEmpty() ? View.GONE : View.VISIBLE);
-                if (query.length() < 2) {
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {
+                String q = s.toString().trim();
+                btn_picker_clear.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
+                if (q.length() < 2) {
                     lv_picker_autocomplete.setVisibility(View.GONE);
-                    pickerPredictions.clear();
-                    adapter.notifyDataSetChanged();
                     return;
                 }
-                pickerPlacesClient.findAutocompletePredictions(
-                                FindAutocompletePredictionsRequest.builder().setQuery(query).build())
-                        .addOnSuccessListener(response -> {
+                pickerPlacesClient.findAutocompletePredictions(FindAutocompletePredictionsRequest.builder().setQuery(q).build())
+                        .addOnSuccessListener(resp -> {
                             pickerPredictions.clear();
-                            pickerPredictions.addAll(response.getAutocompletePredictions());
+                            pickerPredictions.addAll(resp.getAutocompletePredictions());
                             adapter.notifyDataSetChanged();
-                            lv_picker_autocomplete.setVisibility(
-                                    pickerPredictions.isEmpty() ? View.GONE : View.VISIBLE);
-                        })
-                        .addOnFailureListener(e ->
-                                lv_picker_autocomplete.setVisibility(View.GONE));
+                            lv_picker_autocomplete.setVisibility(pickerPredictions.isEmpty() ? View.GONE : View.VISIBLE);
+                        });
             }
-        };
-        et_picker_search.addTextChangedListener(watcher);
+            @Override public void afterTextChanged(Editable s) {}
+        });
 
-        lv_picker_autocomplete.setOnItemClickListener((parent, view, position, id) -> {
-            if (position >= pickerPredictions.size()) return;
-            AutocompletePrediction prediction = pickerPredictions.get(position);
-
-            et_picker_search.removeTextChangedListener(watcher);
-            et_picker_search.setText(prediction.getPrimaryText(null).toString());
-            et_picker_search.addTextChangedListener(watcher);
-
+        lv_picker_autocomplete.setOnItemClickListener((p, v, pos, id) -> {
+            AutocompletePrediction pred = pickerPredictions.get(pos);
+            et_picker_search.setText(pred.getPrimaryText(null));
             lv_picker_autocomplete.setVisibility(View.GONE);
-            pickerPredictions.clear();
-            adapter.notifyDataSetChanged();
             hidePickerKeyboard();
 
-            pickerPlacesClient.fetchPlace(FetchPlaceRequest.newInstance(
-                            prediction.getPlaceId(),
-                            Arrays.asList(Place.Field.LAT_LNG, Place.Field.NAME)))
-                    .addOnSuccessListener(response -> {
-                        Place place = response.getPlace();
-                        if (place.getLatLng() != null && mMap != null) {
-                            LatLng latLng = new LatLng(
-                                    place.getLatLng().latitude,
-                                    place.getLatLng().longitude);
-                            pickedLatLng = latLng;
-                            if (currentMarker != null) currentMarker.setPosition(latLng);
-                            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f));
-                            reverseGeocode(latLng);
+            pickerPlacesClient.fetchPlace(FetchPlaceRequest.newInstance(pred.getPlaceId(), Arrays.asList(Place.Field.LAT_LNG)))
+                    .addOnSuccessListener(resp -> {
+                        LatLng ll = resp.getPlace().getLatLng();
+                        if (ll != null && mMap != null) {
+                            pickedLatLng = ll;
+                            if (currentMarker != null) currentMarker.setPosition(ll);
+                            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(ll, 16f));
+                            reverseGeocode(ll);
                         }
                     });
         });
 
         btn_picker_clear.setOnClickListener(v -> {
-            et_picker_search.removeTextChangedListener(watcher);
             et_picker_search.setText("");
-            et_picker_search.addTextChangedListener(watcher);
             lv_picker_autocomplete.setVisibility(View.GONE);
-            pickerPredictions.clear();
-            adapter.notifyDataSetChanged();
-            btn_picker_clear.setVisibility(View.GONE);
             hidePickerKeyboard();
         });
     }
 
     private void hidePickerKeyboard() {
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (imm != null && et_picker_search != null)
-            imm.hideSoftInputFromWindow(et_picker_search.getWindowToken(), 0);
-    }
-
-    //add to collections
-    private void showCollectionPicker() {
-        App myApp = (App) getApplicationContext();
-        List<Collection> collections = myApp.getCollections();
-
-        if (collections.isEmpty()) {
-            android.widget.Toast.makeText(this,
-                    "No collections yet. Create one in Saved Waypoints first.",
-                    android.widget.Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Build display names with icons
-        String[] options = new String[collections.size() + 1];
-        options[0] = "❌ None";
-        for (int i = 0; i < collections.size(); i++) {
-            options[i + 1] = collections.get(i).icon + " " + collections.get(i).name;
-        }
-
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("Add to Collection")
-                .setItems(options, (dialog, which) -> {
-                    if (which == 0) {
-                        // None selected
-                        selectedCollectionName = null;
-                        tv_selected_collection.setText("Tap to choose a collection...");
-                        tv_selected_collection.setTextColor(
-                                getResources().getColor(R.color.text_light, getTheme()));
-                    } else {
-                        Collection chosen = collections.get(which - 1);
-                        selectedCollectionName = chosen.name;
-                        tv_selected_collection.setText(chosen.icon + " " + chosen.name);
-                        tv_selected_collection.setTextColor(
-                                getResources().getColor(R.color.text_dark, getTheme()));
-                    }
-                })
-                .show();
+        if (imm != null && et_picker_search != null) imm.hideSoftInputFromWindow(et_picker_search.getWindowToken(), 0);
     }
 
     @Override
@@ -252,77 +175,56 @@ public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCa
         mMap = googleMap;
         mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(pickedLatLng, 16f));
 
-        mainMap = googleMap;
-        mapReady = true;
+        if (isDarkMode()) mMap.setMapStyle(MapStyleOptions.loadRawResourceStyle(this, R.raw.map_dark));
 
-        // dark/light map style based on current night mode
-        int nightMode = AppCompatDelegate.getDefaultNightMode();
-        boolean isNight = nightMode == AppCompatDelegate.MODE_NIGHT_YES ||
-                (nightMode == AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM &&
-                        (getResources().getConfiguration().uiMode &
-                                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                                android.content.res.Configuration.UI_MODE_NIGHT_YES);
-        if (isNight) mainMap.setMapStyle(MapStyleOptions.loadRawResourceStyle(this, R.raw.map_dark));
-
-        currentMarker = mMap.addMarker(new MarkerOptions()
-                .position(pickedLatLng)
-                .draggable(true)
-                .title("Picked Location"));
+        currentMarker = mMap.addMarker(new MarkerOptions().position(pickedLatLng).draggable(true).title("Picked Location"));
         reverseGeocode(pickedLatLng);
 
-        // Tap to move pin
         mMap.setOnMapClickListener(latLng -> {
             pickedLatLng = latLng;
             if (currentMarker != null) currentMarker.setPosition(latLng);
             reverseGeocode(latLng);
         });
 
-        // Drag pin
         mMap.setOnMarkerDragListener(new GoogleMap.OnMarkerDragListener() {
             @Override public void onMarkerDragStart(@NonNull Marker marker) {}
             @Override public void onMarkerDrag(@NonNull Marker marker) {}
-            @Override
-            public void onMarkerDragEnd(@NonNull Marker marker) {
+            @Override public void onMarkerDragEnd(@NonNull Marker marker) {
                 pickedLatLng = marker.getPosition();
                 reverseGeocode(pickedLatLng);
             }
         });
     }
 
-    private void reverseGeocode(LatLng latLng) {
-        tv_coords.setText(String.format("%.6f, %.6f", latLng.latitude, latLng.longitude));
+    private void reverseGeocode(LatLng ll) {
+        tv_coords.setText(String.format("%.6f, %.6f", ll.latitude, ll.longitude));
         try {
-            Geocoder geocoder = new Geocoder(this);
-            List<Address> addresses = geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1);
+            List<Address> addresses = new Geocoder(this).getFromLocation(ll.latitude, ll.longitude, 1);
             if (addresses != null && !addresses.isEmpty()) {
                 pickedAddress = addresses.get(0).getAddressLine(0);
                 tv_address.setText(pickedAddress);
-            } else {
-                tv_address.setText("Unknown address");
-                pickedAddress = "";
             }
         } catch (Exception e) {
-            tv_address.setText("Unable to resolve address");
-            pickedAddress = "";
+            tv_address.setText("Unknown address");
         }
     }
 
     private void returnResult() {
-        if (pickedLatLng == null) return;
-
-        String name  = et_name  != null ? et_name.getText().toString().trim()  : "";
-        String notes = et_notes != null ? et_notes.getText().toString().trim() : "";
-
-        // Use address as fallback name if empty
-        if (name.isEmpty()) name = pickedAddress;
-
-        Intent result = new Intent();
-        result.putExtra("picked_lat",     pickedLatLng.latitude);
-        result.putExtra("picked_lng",     pickedLatLng.longitude);
-        result.putExtra("picked_address", pickedAddress);
-        result.putExtra("picked_name",    name);
-        result.putExtra("picked_notes",   notes);
-        setResult(RESULT_OK, result);
+        Intent res = new Intent();
+        res.putExtra("picked_lat", pickedLatLng.latitude);
+        res.putExtra("picked_lng", pickedLatLng.longitude);
+        res.putExtra("picked_address", pickedAddress);
+        res.putExtra("picked_name", et_name.getText().toString().trim());
+        res.putExtra("picked_notes", et_notes.getText().toString().trim());
+        setResult(RESULT_OK, res);
         finish();
+    }
+
+    private boolean isDarkMode() {
+        int nightMode = AppCompatDelegate.getDefaultNightMode();
+        if (nightMode == AppCompatDelegate.MODE_NIGHT_YES) return true;
+        if (nightMode == AppCompatDelegate.MODE_NIGHT_NO) return false;
+        return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) 
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 }

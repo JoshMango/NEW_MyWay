@@ -15,6 +15,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.usc.myway.R;
+
 import java.util.ArrayList;
 import java.util.List;
 

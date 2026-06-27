@@ -1,8 +1,9 @@
-// show map layout
 package com.usc.myway;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -19,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -35,42 +37,41 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import ph.edu.gps_tracker.databinding.ActivityMapsBinding;
-
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
     private App myApp;
     private GoogleMap mMap;
-    private ActivityMapsBinding binding;
     List<Location> savedLocs;
 
-    private Map<String, String> locationNotes; // reference to App's persistent map
-    private final Map<Marker, String> markerKeys = new HashMap<>(); // marker → "lat,lng" key
+    private Map<String, String> locationNotes; 
+    private final Map<Marker, String> markerKeys = new HashMap<>(); 
     private final Map<Marker, Marker> labelMarkers = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        binding = ActivityMapsBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
+        setContentView(R.layout.activity_maps);
 
         SupportMapFragment mapFragment = (SupportMapFragment)
                 getSupportFragmentManager().findFragmentById(R.id.map);
-        mapFragment.getMapAsync(this);
+        if (mapFragment != null) mapFragment.getMapAsync(this);
 
         myApp = (App) getApplicationContext();
         savedLocs = myApp.getMyLocations();
-        locationNotes = myApp.getLocationNotes(); // load persisted notes
+        locationNotes = myApp.getLocationNotes(); 
     }
 
     @Override
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
 
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            mMap.setMyLocationEnabled(true);
+            mMap.getUiSettings().setMyLocationButtonEnabled(true);
+        }
+
         double lat = getIntent().getDoubleExtra("latitude", -34);
         double lng = getIntent().getDoubleExtra("longitude", 151);
         LatLng myLocation = new LatLng(lat, lng);
-
-        final boolean[] deleteTapped = {false};
 
         mMap.setInfoWindowAdapter(new GoogleMap.InfoWindowAdapter() {
             @Override public View getInfoWindow(Marker m) {
@@ -80,15 +81,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             @Override public View getInfoContents(Marker m) { return null; }
         });
 
-        mMap.setOnMarkerClickListener(m -> {
-            if (labelMarkers.containsValue(m)) return true;
-            deleteTapped[0] = false;
-            m.showInfoWindow();
-
-            // Attach touch listener to the map to detect which button area was tapped
-            mMap.setOnMapClickListener(null); // clear temporarily
-            return true;
-        });
         mMap.setOnInfoWindowClickListener(marker -> {
             if (labelMarkers.containsValue(marker)) return;
             new AlertDialog.Builder(MapsActivity.this)
@@ -132,11 +124,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .zIndex(1f));
         String myKey = App.locationKey(lat, lng);
         markerKeys.put(myMarker, myKey);
-        // Restore floating bubble if note already exists
         String existingMyNote = locationNotes.getOrDefault(myKey, "");
         if (!existingMyNote.isEmpty()) addLabelMarker(myMarker, existingMyNote);
 
-        // Saved waypoint markers
         for (Location loc : savedLocs) {
             LatLng latLng = new LatLng(loc.getLatitude(), loc.getLongitude());
             String title  = getLocationTitle(loc.getLatitude(), loc.getLongitude());
@@ -147,24 +137,20 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     .zIndex(1f));
             String key = App.locationKey(loc.getLatitude(), loc.getLongitude());
             markerKeys.put(marker, key);
-            // Restore floating bubble if note already exists
             String existingNote = locationNotes.getOrDefault(key, "");
             if (!existingNote.isEmpty()) addLabelMarker(marker, existingNote);
         }
         mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(myLocation, 15));
 
-        // Tap pin → show custom info window
         mMap.setOnMarkerClickListener(marker -> {
-            if (labelMarkers.containsValue(marker)) return true; // ignore label taps
+            if (labelMarkers.containsValue(marker)) return true;
             marker.showInfoWindow();
             return true;
         });
     }
 
-    // Builds the tappable info window shown when a pin is pressed
     private View buildInfoWindow(Marker marker) {
         View view = getLayoutInflater().inflate(R.layout.custom_infowindow, null);
-
         TextView tv_title    = view.findViewById(R.id.tv_info_title);
         TextView tv_snippet  = view.findViewById(R.id.tv_info_snippet);
         TextView tv_btnLabel = view.findViewById(R.id.tv_note_btn_label);
@@ -184,41 +170,28 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         return view;
     }
 
-    // Adds a floating bitmap bubble above a pin (only when note exists)
     private void addLabelMarker(Marker pinMarker, String note) {
         if (note == null || note.isEmpty()) return;
-
-        LatLng pos      = pinMarker.getPosition();
-        LatLng labelPos = new LatLng(pos.latitude + 0.00018, pos.longitude);
-
+        LatLng pos = pinMarker.getPosition();
         Marker label = mMap.addMarker(new MarkerOptions()
-                .position(labelPos)
+                .position(new LatLng(pos.latitude + 0.00018, pos.longitude))
                 .icon(buildLabelBitmap(this, pinMarker.getTitle(), note))
-                .flat(true)
-                .anchor(0.5f, 1.0f)
-                .zIndex(2f));
-
+                .flat(true).anchor(0.5f, 1.0f).zIndex(2f));
         labelMarkers.put(pinMarker, label);
     }
 
     private void refreshLabel(Marker pinMarker) {
         Marker oldLabel = labelMarkers.remove(pinMarker);
         if (oldLabel != null) oldLabel.remove();
-
         String key  = markerKeys.getOrDefault(pinMarker, "");
         String note = locationNotes.getOrDefault(key, "");
-        if (note != null && !note.isEmpty()) {
-            addLabelMarker(pinMarker, note);
-        }
+        if (note != null && !note.isEmpty()) addLabelMarker(pinMarker, note);
     }
 
     private static BitmapDescriptor buildLabelBitmap(Context ctx, String title, String note) {
         float density   = ctx.getResources().getDisplayMetrics().density;
-        float padding   = 10 * density;
-        float titleSize = 11 * density;
-        float noteSize  = 10 * density;
-        float radius    = 8  * density;
-        float tailH     = 8  * density;
+        float padding   = 10 * density, titleSize = 11 * density, noteSize  = 10 * density;
+        float radius    = 8  * density, tailH     = 8  * density;
 
         Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setTextSize(titleSize);
@@ -233,105 +206,67 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         String displayNote  = note.length()  > 32 ? note.substring(0,  29) + "..." : note;
         String noteText     = "📝 " + displayNote;
 
-        float titleWidth = titlePaint.measureText(displayTitle);
-        float noteWidth  = notePaint.measureText(noteText);
-        float contentW   = Math.max(titleWidth, noteWidth);
-        float contentH   = titleSize + noteSize + 4 * density;
-
+        float contentW = Math.max(titlePaint.measureText(displayTitle), notePaint.measureText(noteText));
         float bmpW = contentW + padding * 2;
-        float bmpH = contentH + padding * 2 + tailH;
+        float bmpH = titleSize + noteSize + 4 * density + padding * 2 + tailH;
 
-        Bitmap bmp    = Bitmap.createBitmap((int) bmpW, (int) bmpH, Bitmap.Config.ARGB_8888);
+        Bitmap bmp = Bitmap.createBitmap((int) bmpW, (int) bmpH, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
-
-        // White bubble
-        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bgPaint.setColor(Color.WHITE);
         RectF bubbleRect = new RectF(0, 0, bmpW, bmpH - tailH);
+        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG); bgPaint.setColor(Color.WHITE);
         canvas.drawRoundRect(bubbleRect, radius, radius, bgPaint);
 
-        // Tail
-        Paint tailPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        tailPaint.setColor(Color.WHITE);
-        float cx = bmpW / 2f;
         Path tail = new Path();
+        float cx = bmpW / 2f;
         tail.moveTo(cx - 6 * density, bmpH - tailH);
         tail.lineTo(cx + 6 * density, bmpH - tailH);
         tail.lineTo(cx, bmpH);
         tail.close();
-        canvas.drawPath(tail, tailPaint);
+        canvas.drawPath(tail, bgPaint);
 
-        // Border
         Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         borderPaint.setColor(Color.parseColor("#E2E8F0"));
         borderPaint.setStyle(Paint.Style.STROKE);
         borderPaint.setStrokeWidth(1.5f * density);
         canvas.drawRoundRect(bubbleRect, radius, radius, borderPaint);
 
-        // Title
         canvas.drawText(displayTitle, padding, padding + titleSize, titlePaint);
-        // Note
         canvas.drawText(noteText, padding, padding + titleSize + 4 * density + noteSize, notePaint);
 
         return BitmapDescriptorFactory.fromBitmap(bmp);
     }
 
     private void showNoteDialog(Marker marker) {
-        String key          = markerKeys.getOrDefault(marker, "");
+        String key = markerKeys.getOrDefault(marker, "");
         String existingNote = locationNotes.getOrDefault(key, "");
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("📝 " + (existingNote.isEmpty() ? "Add Note" : "Edit Note"));
-        builder.setMessage("Enter a label or description for this location:");
-
         EditText input = new EditText(this);
-        input.setHint("e.g. Coffee shop, Meeting point...");
         input.setText(existingNote);
-        input.setSingleLine(false);
-        input.setMaxLines(3);
-
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) (16 * getResources().getDisplayMetrics().density);
         container.setPadding(pad, pad, pad, 0);
         container.addView(input);
-        builder.setView(container);
 
-        builder.setPositiveButton("Save Note", (dialog, which) -> {
-            String note = input.getText().toString().trim();
-            myApp.saveNote(key, note);   // save to App's persistent map
-            refreshLabel(marker);
-            marker.showInfoWindow();
-            Toast.makeText(this, "Note saved!", Toast.LENGTH_SHORT).show();
-        });
-
-        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss());
-
-        builder.setNeutralButton("Clear Note", (dialog, which) -> {
-            myApp.removeNote(key);      // remove from App's persistent map
-            refreshLabel(marker);
-            marker.showInfoWindow();
-        });
-        builder.show();
+        new AlertDialog.Builder(this)
+                .setTitle("📝 Edit Note")
+                .setView(container)
+                .setPositiveButton("Save", (d, w) -> {
+                    myApp.saveNote(key, input.getText().toString().trim());
+                    refreshLabel(marker);
+                    marker.showInfoWindow();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private String getLocationTitle(double lat, double lng) {
-        Geocoder geocoder = new Geocoder(this);
         try {
-            List<android.location.Address> addresses = geocoder.getFromLocation(lat, lng, 1);
+            List<android.location.Address> addresses = new Geocoder(this).getFromLocation(lat, lng, 1);
             if (addresses != null && !addresses.isEmpty()) {
-                android.location.Address address = addresses.get(0);
-                String name   = address.getFeatureName();
-                String street = address.getThoroughfare();
-                String suburb = address.getSubLocality();
-                String city   = address.getLocality();
-
-                if (name != null && !name.matches("\\d+.*"))  return name;
-                else if (street != null) return name != null ? name + ", " + street : street;
-                else if (suburb != null) return suburb;
-                else if (city   != null) return city;
+                String name = addresses.get(0).getFeatureName();
+                if (name != null && !name.matches("\\d+.*")) return name;
             }
-        } catch (Exception e) { /* fall through */ }
+        } catch (Exception ignored) {}
         return String.format("%.5f, %.5f", lat, lng);
     }
 }

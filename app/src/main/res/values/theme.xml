@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.GPS_Tracker" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.MyWay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">#00BCD4</item>
         <item name="colorPrimaryDark">#0097A7</item>
         <item name="colorPrimaryVariant">#0097A7</item>
