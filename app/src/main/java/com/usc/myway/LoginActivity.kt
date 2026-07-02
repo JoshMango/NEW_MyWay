@@ -242,7 +242,7 @@ class LoginActivity : ComponentActivity() {
     }
 
     private fun goToMain() {
-        startActivity(Intent(this, MainActivity::class.java).putExtra("just_logged_in", true))
+        startActivity(Intent(this, MainActivity::class.java))
         finish()
     }
 }

@@ -1,3 +1,5 @@
+<img src="./app/assets/templogo.png" alt="logo" width="96">
+
 # MyWay 🗺️
 
 **The ultimate group travel companion.** Real-time location sharing, group chats, waypoint planning, and invite management — all in one beautifully crafted Android app. Stop juggling Google Maps, Life360, and Messenger. MyWay does it all.
@@ -8,7 +10,7 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Android Studio (latest)
+- Android Studio
 - Android SDK 24+ (API level 24 is minimum; targeting API 36)
 - Firebase account with a project initialized for Android
 
@@ -16,7 +18,7 @@
 
 1. **Clone and open in Android Studio**
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/JoshMango/NEW_MyWay
    cd NEW_MyWay
    ```
 
