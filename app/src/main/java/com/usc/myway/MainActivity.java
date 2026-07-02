@@ -127,6 +127,26 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         updateGPS();
         sw_locUpdates.setChecked(true);
         startLocationUpdates();
+
+        // ponytail: greeting Toast disabled — re-enable as a proper in-app banner once MainActivity is on Compose.
+        // maybeGreet();
+    }
+
+    private void maybeGreet() {
+        if (!getIntent().getBooleanExtra("just_logged_in", false)) return;
+        getIntent().removeExtra("just_logged_in"); // don't re-greet on rotation
+        com.google.firebase.auth.FirebaseUser u = FirebaseAuth.getInstance().getCurrentUser();
+        String full = u != null ? u.getDisplayName() : null;
+        String name = (full != null && !full.trim().isEmpty()) ? full.trim().split(" ")[0] : "";
+        String[] withName = {
+                "Welcome back, %s! 🎉", "Great to see you, %s! 👋",
+                "You're in, %s! 🚀", "Hey %s, adventure awaits! 🗺️"
+        };
+        String[] noName = {"Welcome back! 🎉", "Great to see you! 👋", "You're in! 🚀"};
+        String msg = name.isEmpty()
+                ? noName[(int) (System.currentTimeMillis() % noName.length)]
+                : String.format(withName[(int) (System.currentTimeMillis() % withName.length)], name);
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
     @Override
