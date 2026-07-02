@@ -67,9 +67,6 @@ public class App extends Application {
         // Build key BEFORE removing, using full double precision
         String key = locationKey(loc.getLatitude(), loc.getLongitude());
 
-        android.util.Log.d("APP_DEBUG", "Removing key: " + key);
-        android.util.Log.d("APP_DEBUG", "Notes before: " + locationNotes.toString());
-
         myLocations.remove(loc);
         saveLocationsToPrefs();
 
@@ -82,7 +79,6 @@ public class App extends Application {
         // Remove note — key must match exactly
         removeNote(key);
         removeLocationName(key);
-        android.util.Log.d("APP_DEBUG", "Notes after: " + locationNotes.toString());
     }
 
     // ── Notes ────────────────────────────────────────────────────────────────

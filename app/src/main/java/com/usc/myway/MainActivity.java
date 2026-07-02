@@ -127,26 +127,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         updateGPS();
         sw_locUpdates.setChecked(true);
         startLocationUpdates();
-
-        // ponytail: greeting Toast disabled — re-enable as a proper in-app banner once MainActivity is on Compose.
-        // maybeGreet();
-    }
-
-    private void maybeGreet() {
-        if (!getIntent().getBooleanExtra("just_logged_in", false)) return;
-        getIntent().removeExtra("just_logged_in"); // don't re-greet on rotation
-        com.google.firebase.auth.FirebaseUser u = FirebaseAuth.getInstance().getCurrentUser();
-        String full = u != null ? u.getDisplayName() : null;
-        String name = (full != null && !full.trim().isEmpty()) ? full.trim().split(" ")[0] : "";
-        String[] withName = {
-                "Welcome back, %s! 🎉", "Great to see you, %s! 👋",
-                "You're in, %s! 🚀", "Hey %s, adventure awaits! 🗺️"
-        };
-        String[] noName = {"Welcome back! 🎉", "Great to see you! 👋", "You're in! 🚀"};
-        String msg = name.isEmpty()
-                ? noName[(int) (System.currentTimeMillis() % noName.length)]
-                : String.format(withName[(int) (System.currentTimeMillis() % withName.length)], name);
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -293,8 +273,75 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             @Override public View getInfoWindow(Marker m) { return labelMarkers.containsValue(m) ? null : buildInfoWindow(m); }
             @Override public View getInfoContents(Marker m) { return null; }
         });
-        mainMap.setOnMarkerClickListener(m -> { if (!labelMarkers.containsValue(m)) m.showInfoWindow(); return true; });
+        mainMap.setOnMarkerClickListener(m -> {
+            if (labelMarkers.containsValue(m)) return true;
+            m.showInfoWindow();
+            return true;
+        });
+        mainMap.setOnInfoWindowClickListener(m -> {
+            if (!labelMarkers.containsValue(m)) showMarkerActions(m);
+        });
         refreshMapMarkers();
+    }
+
+    private void showMarkerActions(Marker marker) {
+        App myApp = (App) getApplicationContext();
+        String key = markerKeys.getOrDefault(marker, "");
+        View sheet = getLayoutInflater().inflate(R.layout.sheet_marker_actions, null);
+        ((TextView) sheet.findViewById(R.id.tv_sheet_title)).setText(marker.getTitle());
+        String note = myApp.getLocationNotes().getOrDefault(key, "");
+        TextView tvNote = sheet.findViewById(R.id.tv_sheet_note);
+        if (!note.isEmpty()) { tvNote.setVisibility(View.VISIBLE); tvNote.setText("📝 " + note); }
+        else { tvNote.setVisibility(View.GONE); }
+
+        com.google.android.material.bottomsheet.BottomSheetDialog dialog =
+                new com.google.android.material.bottomsheet.BottomSheetDialog(this);
+        dialog.setContentView(sheet);
+        sheet.findViewById(R.id.btn_add_note).setOnClickListener(v -> { dialog.dismiss(); showNoteDialog(marker); });
+        sheet.findViewById(R.id.btn_delete_location).setOnClickListener(v -> { dialog.dismiss(); confirmDelete(marker); });
+        dialog.show();
+    }
+
+    private void confirmDelete(Marker marker) {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Waypoint")
+                .setMessage("Are you sure you want to delete this location?")
+                .setPositiveButton("Delete", (d, w) -> {
+                    String key = markerKeys.getOrDefault(marker, "");
+                    App myApp = (App) getApplicationContext();
+                    for (Location loc : myApp.getMyLocations()) {
+                        if (App.locationKey(loc.getLatitude(), loc.getLongitude()).equals(key)) {
+                            myApp.removeLocation(loc);
+                            break;
+                        }
+                    }
+                    refreshMapMarkers();
+                    Toast.makeText(this, "Location deleted.", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showNoteDialog(Marker marker) {
+        String key = markerKeys.getOrDefault(marker, "");
+        App myApp = (App) getApplicationContext();
+        String existingNote = myApp.getLocationNotes().getOrDefault(key, "");
+        EditText input = new EditText(this);
+        input.setText(existingNote);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        container.setPadding(pad, pad, pad, 0);
+        container.addView(input);
+        new AlertDialog.Builder(this)
+                .setTitle("📝 Edit Note")
+                .setView(container)
+                .setPositiveButton("Save", (d, w) -> {
+                    myApp.saveNote(key, input.getText().toString().trim());
+                    refreshMapMarkers();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void enableMyLocationLayer() {
@@ -517,8 +564,13 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         View v = getLayoutInflater().inflate(R.layout.dialog_savepin, null); AlertDialog dialog = new AlertDialog.Builder(this).setView(v).create();
         v.findViewById(R.id.btn_pin_save).setOnClickListener(view -> {
             Location loc = new Location("picked"); loc.setLatitude(ll.latitude); loc.setLongitude(ll.longitude);
-            ((App)getApplicationContext()).saveLocation(loc); String name = ((EditText)v.findViewById(R.id.et_pin_name)).getText().toString().trim();
-            if (!name.isEmpty()) ((App)getApplicationContext()).saveLocationName(App.locationKey(ll.latitude, ll.longitude), name);
+            App myApp = (App) getApplicationContext();
+            myApp.saveLocation(loc);
+            String key = App.locationKey(ll.latitude, ll.longitude);
+            String name = ((EditText)v.findViewById(R.id.et_pin_name)).getText().toString().trim();
+            if (!name.isEmpty()) myApp.saveLocationName(key, name);
+            String notes = ((EditText)v.findViewById(R.id.et_pin_notes)).getText().toString().trim();
+            if (!notes.isEmpty()) myApp.saveNote(key, notes);
             refreshMapMarkers(); dialog.dismiss(); togglePickerMode();
         });
         v.findViewById(R.id.btn_pin_cancel).setOnClickListener(view -> { dialog.dismiss(); togglePickerMode(); });

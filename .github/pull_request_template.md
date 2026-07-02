@@ -1,3 +1,5 @@
+Thanks for your contribution. The following instructions would make your pull request more healthy and more easily get feedback. If you do not understand some items, don't worry, just make the pull request and seek help from maintainers.
+
 ## Motivation
 
 <!-- Describe the problem this PR solves or the feature it adds. -->
@@ -15,7 +17,7 @@ If so, please describe how it breaks the compatibility and how the downstream pr
 
 ## Use cases (Optional)
 
-If this PR introduces a new feature, it is better to list some use cases here and update the documentation.
+<!-- If this PR introduces a new feature, it is better to list some use cases here and update the documentation. -->
 
 - N/A
 
