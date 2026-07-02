@@ -17,7 +17,7 @@ If so, please describe how it breaks the compatibility and how the downstream pr
 
 ## Use cases (Optional)
 
-If this PR introduces a new feature, it is better to list some use cases here and update the documentation.
+<!-- If this PR introduces a new feature, it is better to list some use cases here and update the documentation. -->
 
 - N/A
 
