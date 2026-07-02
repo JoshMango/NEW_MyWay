@@ -1,4 +1,4 @@
-# MyWay App
+# MyWay
 - The Ultimate Group Travel App
 ## Setup
 - To add

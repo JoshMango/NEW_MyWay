@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "953641079637",
+    "project_id": "myway-b2954",
+    "storage_bucket": "myway-b2954.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:953641079637:android:817a3173401d5f009dd5dc",
+        "android_client_info": {
+          "package_name": "com.usc.myway"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "953641079637-ah4dh38s5o5d47bpsapv6h9hd5mkh5o4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.usc.myway",
+            "certificate_hash": "eb886b19b28ea054a9fcb4f8ec3106125d0adf37"
+          }
+        },
+        {
+          "client_id": "953641079637-rq2t58qjms8s7v7b10o2obtspq1a2i9m.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmDI-1X4-FJDZvScCheXYKtou9DyLVUWA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "953641079637-rq2t58qjms8s7v7b10o2obtspq1a2i9m.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
