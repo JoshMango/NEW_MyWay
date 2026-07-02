@@ -95,7 +95,7 @@ public class MapPickerActivity extends AppCompatActivity implements OnMapReadyCa
 
     private void setupPickerSearch() {
         if (!Places.isInitialized()) {
-            Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
+            Places.initialize(getApplicationContext(), getString(R.string.MAPS_API_KEY));
         }
         pickerPlacesClient = Places.createClient(this);
 

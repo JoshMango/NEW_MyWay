@@ -393,7 +393,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void setupSearch() {
-        if (!Places.isInitialized()) Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
+        if (!Places.isInitialized()) Places.initialize(getApplicationContext(), getString(R.string.MAPS_API_KEY));
         placesClient = Places.createClient(this);
         et_search = findViewById(R.id.et_search); 
         lv_autocomplete = findViewById(R.id.lv_autocomplete); 
