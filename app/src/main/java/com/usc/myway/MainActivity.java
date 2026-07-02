@@ -59,6 +59,9 @@ import com.google.android.libraries.places.api.model.Place;
 import com.google.android.libraries.places.api.net.FetchPlaceRequest;
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest;
 import com.google.android.libraries.places.api.net.PlacesClient;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.firebase.auth.FirebaseAuth;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -116,6 +119,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         bindViews();
         setupHamburger();
         setupThemeToggle();
+        setupLogout();
         setupLocationRequest();
         setupButtonListeners();
         setupSearch();
@@ -168,6 +172,17 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 left_sidebar.setTranslationX(-left_sidebar.getWidth());
                 left_sidebar.animate().alpha(1f).translationX(0f).setDuration(200).start();
             }
+        });
+    }
+
+    private void setupLogout() {
+        findViewById(R.id.btn_logout).setOnClickListener(v -> {
+            FirebaseAuth.getInstance().signOut();
+            GoogleSignIn.getClient(this, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut();
+            Intent i = new Intent(this, LoginActivity.class);
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(i);
+            finish();
         });
     }
 
@@ -393,7 +408,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void setupSearch() {
-        if (!Places.isInitialized()) Places.initialize(getApplicationContext(), getString(R.string.MAPS_API_KEY));
+        if (!Places.isInitialized()) Places.initialize(getApplicationContext(), BuildConfig.MAPS_API_KEY);
         placesClient = Places.createClient(this);
         et_search = findViewById(R.id.et_search); 
         lv_autocomplete = findViewById(R.id.lv_autocomplete); 
