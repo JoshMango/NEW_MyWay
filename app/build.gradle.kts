@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.play.services.auth)
     implementation(libs.play.services.maps)
+    implementation(libs.maps.compose)
     implementation("com.google.android.libraries.places:places:3.3.0")
 
     implementation(platform(libs.firebase.bom))
