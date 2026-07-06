@@ -71,10 +71,6 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
     private PlacesClient placesClient;
-    private EditText et_search;
-    private ListView lv_autocomplete;
-    private TextView btn_search_clear;
-    private final List<AutocompletePrediction> predictions = new ArrayList<>();
     private static final int PERMISSION_FINE_LOCATION = 99;
     private static final int MAP_PICKER_REQUEST       = 101;
     private static final int WAYPOINT_PICKER_REQUEST  = 102;
@@ -99,10 +95,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private final Map<String, Bitmap> photoCache  = new HashMap<>();
     private final Map<String, Boolean> isOpenCache = new HashMap<>();
 
-    private TextView tv_lat, tv_lon, tv_alt, tv_accuracy, tv_speed,
-            tv_address, tv_savedAdd, tv_waypointCounts, tv_pin_label;
-    private LinearLayout btn_save_location, btn_share_location, btn_pin_on_map;
+    private TextView tv_waypointCounts; // top-header count badge (still XML)
     private final SidebarState sidebarState = new SidebarState();
+    private final StatsState statsState = new StatsState();
 
     private double savedLatitude  = 0;
     private double savedLongitude = 0;
@@ -117,7 +112,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private Marker tempPickerMarker = null;
     private boolean isPickerModeActive = false;
-    private TextWatcher searchWatcher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -134,8 +128,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         bindViews();
         setupHamburger();
         setupSidebar();
+        setupBottomCard();
         setupLocationRequest();
-        setupButtonListeners();
         setupSearch();
 
         updateGPS();
@@ -150,18 +144,17 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void bindViews() {
-        tv_lat            = findViewById(R.id.tv_lat);
-        tv_lon            = findViewById(R.id.tv_lon);
-        tv_alt            = findViewById(R.id.tv_altitude);
-        tv_accuracy       = findViewById(R.id.tv_accuracy);
-        tv_speed          = findViewById(R.id.tv_speed);
-        tv_address        = findViewById(R.id.tv_address);
-        tv_savedAdd       = findViewById(R.id.tv_savedAddress);
         tv_waypointCounts = findViewById(R.id.tv_countCrumbs);
-        btn_save_location  = findViewById(R.id.btn_save_location);
-        btn_share_location = findViewById(R.id.btn_share_location);
-        btn_pin_on_map    = findViewById(R.id.btn_pin_on_map);
-        tv_pin_label      = findViewById(R.id.tv_pin_label);
+    }
+
+    private void setupBottomCard() {
+        androidx.compose.ui.platform.ComposeView cv = findViewById(R.id.bottom_compose);
+        StatsActions actions = new StatsActions() {
+            @Override public void onSave()  { startWaypointPicker(); }
+            @Override public void onPin()   { togglePickerMode(); }
+            @Override public void onShare() { shareLocation(); }
+        };
+        BottomCardHost.install(cv, statsState, actions, isDarkMode());
     }
 
     private void setupHamburger() {
@@ -253,11 +246,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .setMinUpdateIntervalMillis(1000L * FAST_UPD_INTERVAL).build();
     }
 
-    private void setupButtonListeners() {
-        btn_pin_on_map.setOnClickListener(v -> togglePickerMode());
-        btn_save_location.setOnClickListener(v -> startWaypointPicker());
-        btn_share_location.setOnClickListener(v -> shareLocation());
-    }
 
     @Override
     public void onMapReady(GoogleMap googleMap) {
@@ -695,7 +683,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void stopLocationUpdates() {
-        tv_lat.setText("--"); tv_lon.setText("--"); tv_speed.setText("--"); tv_address.setText("Not tracking");
+        statsState.setLat("--"); statsState.setLon("--"); statsState.setSpeed("--");
+        statsState.setAddress("Not tracking");
         fusedLocClient.removeLocationUpdates(locCallBack);
     }
 
@@ -711,10 +700,11 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void updateUIValues(Location loc) {
         if (loc == null) return;
         savedLatitude = loc.getLatitude(); savedLongitude = loc.getLongitude();
-        tv_lat.setText(String.format("%.5f", savedLatitude)); tv_lon.setText(String.format("%.5f", savedLongitude));
-        tv_accuracy.setText(String.format("%.1fm", loc.getAccuracy()));
-        tv_alt.setText(loc.hasAltitude() ? String.format("%.1fm", loc.getAltitude()) : "N/A");
-        tv_speed.setText(loc.hasSpeed() ? String.format("%.1fkm/h", loc.getSpeed() * 3.6f) : "0km/h");
+        statsState.setLat(String.format("%.5f", savedLatitude));
+        statsState.setLon(String.format("%.5f", savedLongitude));
+        statsState.setAccuracy(String.format("%.1fm", loc.getAccuracy()));
+        statsState.setAltitude(loc.hasAltitude() ? String.format("%.1fm", loc.getAltitude()) : "N/A");
+        statsState.setSpeed(loc.hasSpeed() ? String.format("%.1fkm/h", loc.getSpeed() * 3.6f) : "0km/h");
         maybeGeocodeAddress(savedLatitude, savedLongitude);
         App myApp = (App) getApplicationContext();
         tv_waypointCounts.setText(String.valueOf(myApp.getMyLocations().size()));
@@ -740,8 +730,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             } catch (Exception e) { addr = null; }
             final String result = addr;
             runOnUiThread(() -> {
-                if (result != null) { savedAddress = result; tv_address.setText(result); }
-                else tv_address.setText("Unable to get address");
+                if (result != null) { savedAddress = result; statsState.setAddress(result); }
+                else statsState.setAddress("Unable to get address");
             });
         });
     }
@@ -779,7 +769,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         double lat = data.getDoubleExtra("picked_lat", 0); double lng = data.getDoubleExtra("picked_lng", 0);
         if (requestCode == MAP_PICKER_REQUEST) {
             savedLatitude = lat; savedLongitude = lng; savedAddress = data.getStringExtra("picked_address");
-            tv_address.setText(savedAddress); tv_savedAdd.setVisibility(View.VISIBLE); tv_savedAdd.setText("📍 " + savedAddress);
+            String shown = savedAddress != null ? savedAddress : "";
+            statsState.setAddress(shown); statsState.setSavedAddress(shown);
             if (mainMap != null) mainMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(lat, lng), 18f));
         } else if (requestCode == WAYPOINT_PICKER_REQUEST) {
             App myApp = (App) getApplicationContext(); Location pickedLoc = new Location("picked"); pickedLoc.setLatitude(lat); pickedLoc.setLongitude(lng);
@@ -919,80 +910,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void setupSearch() {
         if (!Places.isInitialized()) Places.initialize(getApplicationContext(), BuildConfig.MAPS_API_KEY);
         placesClient = Places.createClient(this);
-        et_search = findViewById(R.id.et_search); 
-        lv_autocomplete = findViewById(R.id.lv_autocomplete); 
-        btn_search_clear = findViewById(R.id.btn_search_clear);
-        
-        ArrayAdapter<AutocompletePrediction> adapter = new ArrayAdapter<AutocompletePrediction>(this, R.layout.item_autocomplete, R.id.tv_place_name, predictions) {
-            @NonNull @Override public View getView(int position, View convertView, @NonNull ViewGroup parent) {
-                if (convertView == null) convertView = LayoutInflater.from(getContext()).inflate(R.layout.item_autocomplete, parent, false);
-                AutocompletePrediction pred = getItem(position);
-                if (pred != null) {
-                    ((TextView) convertView.findViewById(R.id.tv_place_name)).setText(pred.getPrimaryText(null));
-                    ((TextView) convertView.findViewById(R.id.tv_place_address)).setText(pred.getSecondaryText(null));
-                }
-                return convertView;
-            }
-        };
-        lv_autocomplete.setAdapter(adapter);
-
-        searchWatcher = new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {
-                String q = s.toString().trim(); 
-                btn_search_clear.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
-                if (q.length() < 2) { 
-                    lv_autocomplete.setVisibility(View.GONE); 
-                    predictions.clear();
-                    adapter.notifyDataSetChanged();
-                    return; 
-                }
-                placesClient.findAutocompletePredictions(FindAutocompletePredictionsRequest.builder().setQuery(q).build())
-                    .addOnSuccessListener(resp -> {
-                        predictions.clear(); 
-                        predictions.addAll(resp.getAutocompletePredictions()); 
-                        adapter.notifyDataSetChanged();
-                        lv_autocomplete.setVisibility(predictions.isEmpty() ? View.GONE : View.VISIBLE); 
-                        lv_autocomplete.bringToFront();
-                    })
-                    .addOnFailureListener(e -> {
-                        lv_autocomplete.setVisibility(View.GONE);
-                    });
-            }
-            @Override public void afterTextChanged(Editable s) {}
-        };
-        et_search.addTextChangedListener(searchWatcher);
-
-        lv_autocomplete.setOnItemClickListener((parent, view, position, id) -> {
-            AutocompletePrediction pred = predictions.get(position); 
-            et_search.removeTextChangedListener(searchWatcher);
-            et_search.setText(pred.getPrimaryText(null).toString()); 
-            et_search.addTextChangedListener(searchWatcher);
-            lv_autocomplete.setVisibility(View.GONE); 
-            hideKeyboard();
-            placesClient.fetchPlace(FetchPlaceRequest.newInstance(pred.getPlaceId(), Arrays.asList(Place.Field.LAT_LNG)))
-                .addOnSuccessListener(resp -> {
-                    LatLng ll = resp.getPlace().getLatLng(); 
-                    if (ll != null && mainMap != null) mainMap.animateCamera(CameraUpdateFactory.newLatLngZoom(ll, 16f));
-                });
+        androidx.compose.ui.platform.ComposeView cv = findViewById(R.id.search_compose);
+        SearchHost.install(cv, placesClient, isDarkMode(), ll -> {
+            if (mainMap != null) mainMap.animateCamera(CameraUpdateFactory.newLatLngZoom(ll, 16f));
         });
-
-        btn_search_clear.setOnClickListener(v -> { 
-            et_search.setText(""); 
-            lv_autocomplete.setVisibility(View.GONE); 
-            predictions.clear();
-            adapter.notifyDataSetChanged();
-            hideKeyboard(); 
-        });
-    }
-
-    private void hideKeyboard() { 
-        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE); 
-        if (imm != null && et_search != null) imm.hideSoftInputFromWindow(et_search.getWindowToken(), 0); 
     }
 
     private void togglePickerMode() {
-        isPickerModeActive = !isPickerModeActive; tv_pin_label.setText(isPickerModeActive ? "Cancel" : "Pin");
+        isPickerModeActive = !isPickerModeActive; statsState.setPinMode(isPickerModeActive);
         if (isPickerModeActive) {
             mainMap.setOnMapClickListener(ll -> {
                 if (tempPickerMarker != null) tempPickerMarker.remove();
