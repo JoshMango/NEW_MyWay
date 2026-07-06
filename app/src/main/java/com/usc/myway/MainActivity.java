@@ -35,7 +35,6 @@ import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
-import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.app.ActivityCompat;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -88,10 +87,10 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private final Map<Marker, String> markerKeys  = new HashMap<>();  // red pins -> key (normal pins only)
     private final Map<Marker, String> labelKeys   = new HashMap<>();  // floating note labels -> key
 
-    // Landmark note labels collapse to a small pencil marker below this zoom (matches when
-    // Google hides its own POI labels), and expand back to the full card above it.
-    private static final float LABEL_ZOOM = 17f;
-    private final Map<Marker, BitmapDescriptor> landmarkNoteFull = new HashMap<>(); // marker -> full card icon
+    // Note labels (pins AND landmarks) collapse to a small pencil marker below this zoom, so the
+    // map stays clean when zoomed out, and expand back to the full card when zoomed in.
+    private static final float LABEL_ZOOM = 18f;
+    private final Map<Marker, BitmapDescriptor> noteFullIcons = new HashMap<>(); // marker -> full card icon
     private BitmapDescriptor pencilIcon;
     private Boolean notesCollapsed = null;
 
@@ -101,14 +100,17 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private final Map<String, Boolean> isOpenCache = new HashMap<>();
 
     private TextView tv_lat, tv_lon, tv_alt, tv_accuracy, tv_speed,
-            tv_address, tv_savedAdd, tv_waypointCounts, tv_toggletheme, tv_pin_label;
-    private LinearLayout btn_newWaypoint, btn_showWaypointList,
-            btn_toggle_theme, btn_setLocation, btn_save_location, btn_share_location, btn_pin_on_map;
-    private SwitchCompat sw_locUpdates, sw_gps;
+            tv_address, tv_savedAdd, tv_waypointCounts, tv_pin_label;
+    private LinearLayout btn_save_location, btn_share_location, btn_pin_on_map;
+    private final SidebarState sidebarState = new SidebarState();
 
     private double savedLatitude  = 0;
     private double savedLongitude = 0;
     private String savedAddress   = "";
+    // Single background thread for reverse-geocoding; deduped so we don't re-resolve tiny GPS jitter.
+    private final java.util.concurrent.ExecutorService geocodeExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private double lastGeocodedLat = Double.NaN, lastGeocodedLng = Double.NaN;
     private FusedLocationProviderClient fusedLocClient;
     private LocationRequest locReq;
     private LocationCallback locCallBack;
@@ -131,14 +133,12 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         bindViews();
         setupHamburger();
-        setupThemeToggle();
-        setupLogout();
+        setupSidebar();
         setupLocationRequest();
         setupButtonListeners();
         setupSearch();
 
         updateGPS();
-        sw_locUpdates.setChecked(true);
         startLocationUpdates();
     }
 
@@ -158,13 +158,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         tv_address        = findViewById(R.id.tv_address);
         tv_savedAdd       = findViewById(R.id.tv_savedAddress);
         tv_waypointCounts = findViewById(R.id.tv_countCrumbs);
-        sw_gps            = findViewById(R.id.sw_gps);
-        sw_locUpdates     = findViewById(R.id.sw_locationsupdates);
-        btn_newWaypoint      = findViewById(R.id.btn_newWaypoint);
-        btn_showWaypointList = findViewById(R.id.btn_showWaypoint);
-        btn_setLocation      = findViewById(R.id.btn_setLocation);
-        btn_toggle_theme     = findViewById(R.id.btn_toggle_theme);
-        tv_toggletheme       = findViewById(R.id.txt_toggletheme);
         btn_save_location  = findViewById(R.id.btn_save_location);
         btn_share_location = findViewById(R.id.btn_share_location);
         btn_pin_on_map    = findViewById(R.id.btn_pin_on_map);
@@ -188,29 +181,52 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         });
     }
 
-    private void setupLogout() {
-        findViewById(R.id.btn_logout).setOnClickListener(v -> {
-            FirebaseAuth.getInstance().signOut();
-            GoogleSignIn.getClient(this, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut();
-            Intent i = new Intent(this, LoginActivity.class);
-            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(i);
-            finish();
-        });
+    private void setupSidebar() {
+        sidebarState.setDarkMode(isDarkMode());
+        sidebarState.setTracking(true);
+        sidebarState.setGpsHighAccuracy(false);
+        androidx.compose.ui.platform.ComposeView composeView = findViewById(R.id.sidebar_compose);
+        SidebarActions actions = new SidebarActions() {
+            @Override public void onNewWaypoint()  { startWaypointPicker(); }
+            @Override public void onShowWaypoints() { startActivity(new Intent(MainActivity.this, ShowSavedLocations.class)); }
+            @Override public void onSetAddress()    { startAddressPicker(); }
+            @Override public void onToggleTheme()   {
+                AppCompatDelegate.setDefaultNightMode(isDarkMode()
+                        ? AppCompatDelegate.MODE_NIGHT_NO : AppCompatDelegate.MODE_NIGHT_YES);
+            }
+            @Override public void onLogout() {
+                FirebaseAuth.getInstance().signOut();
+                GoogleSignIn.getClient(MainActivity.this, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut();
+                Intent i = new Intent(MainActivity.this, LoginActivity.class);
+                i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(i);
+                finish();
+            }
+            @Override public void onTrackingChanged(boolean enabled) {
+                if (enabled) startLocationUpdates(); else stopLocationUpdates();
+            }
+            @Override public void onGpsModeChanged(boolean highAccuracy) {
+                locReq = buildLocReq(highAccuracy
+                        ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY);
+            }
+        };
+        SidebarHost.install(composeView, sidebarState, actions);
     }
 
-    private void setupThemeToggle() {
-        TextView tv_icon = (TextView) btn_toggle_theme.getChildAt(0);
-        tv_icon.setText(isDarkMode() ? "☀️" : "🌙");
-        tv_toggletheme.setText(isDarkMode() ? "Light Mode" : "Dark Mode");
+    private void startWaypointPicker() {
+        if (savedLatitude == 0 && savedLongitude == 0) return;
+        Intent i = new Intent(this, MapPickerActivity.class);
+        i.putExtra("latitude", savedLatitude); i.putExtra("longitude", savedLongitude);
+        i.putExtra("mode", "waypoint");
+        startActivityForResult(i, WAYPOINT_PICKER_REQUEST);
+    }
 
-        btn_toggle_theme.setOnClickListener(v -> {
-            if (isDarkMode()) {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-            } else {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-            }
-        });
+    private void startAddressPicker() {
+        if (savedLatitude == 0 && savedLongitude == 0) return;
+        Intent i = new Intent(this, MapPickerActivity.class);
+        i.putExtra("latitude", savedLatitude); i.putExtra("longitude", savedLongitude);
+        i.putExtra("mode", "address");
+        startActivityForResult(i, MAP_PICKER_REQUEST);
     }
 
     private boolean isDarkMode() {
@@ -238,25 +254,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void setupButtonListeners() {
-        btn_newWaypoint.setOnClickListener(v -> {
-            if (savedLatitude == 0 && savedLongitude == 0) return;
-            Intent i = new Intent(this, MapPickerActivity.class);
-            i.putExtra("latitude", savedLatitude); i.putExtra("longitude", savedLongitude);
-            i.putExtra("mode", "waypoint");
-            startActivityForResult(i, WAYPOINT_PICKER_REQUEST);
-        });
         btn_pin_on_map.setOnClickListener(v -> togglePickerMode());
-        btn_showWaypointList.setOnClickListener(v -> startActivity(new Intent(this, ShowSavedLocations.class)));
-        btn_setLocation.setOnClickListener(v -> {
-            if (savedLatitude == 0 && savedLongitude == 0) return;
-            Intent i = new Intent(this, MapPickerActivity.class);
-            i.putExtra("latitude", savedLatitude); i.putExtra("longitude", savedLongitude);
-            i.putExtra("mode", "address");
-            startActivityForResult(i, MAP_PICKER_REQUEST);
-        });
-        sw_gps.setOnClickListener(v -> locReq = buildLocReq(sw_gps.isChecked() ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY));
-        sw_locUpdates.setOnClickListener(v -> { if (sw_locUpdates.isChecked()) startLocationUpdates(); else stopLocationUpdates(); });
-        btn_save_location.setOnClickListener(v -> btn_newWaypoint.performClick());
+        btn_save_location.setOnClickListener(v -> startWaypointPicker());
         btn_share_location.setOnClickListener(v -> shareLocation());
     }
 
@@ -716,16 +715,41 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         tv_accuracy.setText(String.format("%.1fm", loc.getAccuracy()));
         tv_alt.setText(loc.hasAltitude() ? String.format("%.1fm", loc.getAltitude()) : "N/A");
         tv_speed.setText(loc.hasSpeed() ? String.format("%.1fkm/h", loc.getSpeed() * 3.6f) : "0km/h");
-        try {
-            List<Address> addresses = new Geocoder(this).getFromLocation(savedLatitude, savedLongitude, 1);
-            if (addresses != null && !addresses.isEmpty()) { savedAddress = addresses.get(0).getAddressLine(0); tv_address.setText(savedAddress); }
-        } catch (Exception e) { tv_address.setText("Unable to get address"); }
+        maybeGeocodeAddress(savedLatitude, savedLongitude);
         App myApp = (App) getApplicationContext();
         tv_waypointCounts.setText(String.valueOf(myApp.getMyLocations().size()));
         if (mapReady && mainMap != null && firstFix && savedLatitude != 0) {
             mainMap.moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(savedLatitude, savedLongitude), 18f));
             firstFix = false;
         }
+    }
+
+    /** Reverse-geocode off the UI thread, skipping if we already resolved a spot within ~15m. */
+    private void maybeGeocodeAddress(double lat, double lng) {
+        if (!Double.isNaN(lastGeocodedLat)) {
+            float[] res = new float[1];
+            Location.distanceBetween(lastGeocodedLat, lastGeocodedLng, lat, lng, res);
+            if (res[0] < 15f) return;  // GPS jitter — reuse the last address
+        }
+        lastGeocodedLat = lat; lastGeocodedLng = lng;
+        geocodeExecutor.execute(() -> {
+            String addr;
+            try {
+                List<Address> a = new Geocoder(this).getFromLocation(lat, lng, 1);
+                addr = (a != null && !a.isEmpty()) ? a.get(0).getAddressLine(0) : null;
+            } catch (Exception e) { addr = null; }
+            final String result = addr;
+            runOnUiThread(() -> {
+                if (result != null) { savedAddress = result; tv_address.setText(result); }
+                else tv_address.setText("Unable to get address");
+            });
+        });
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        geocodeExecutor.shutdownNow();
     }
 
     private void shareLocation() {
@@ -771,7 +795,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (mainMap == null) return;
         for (Marker m : markerKeys.keySet()) m.remove();
         for (Marker m : labelKeys.keySet()) m.remove();
-        markerKeys.clear(); labelKeys.clear(); landmarkNoteFull.clear();
+        markerKeys.clear(); labelKeys.clear(); noteFullIcons.clear();
         notesCollapsed = null;
         App myApp = (App) getApplicationContext();
         for (Location loc : myApp.getMyLocations()) {
@@ -795,12 +819,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         applyNoteZoom();
     }
 
-    /** Note card floating above a red pin (title + note). */
+    /** Note card floating above a red pin (title + note); collapses to a pencil on zoom-out. */
     private void addPinNoteLabel(LatLng pos, String title, String note, String key) {
+        BitmapDescriptor full = buildLabelBitmap(this, title, note, 0f);
         Marker label = mainMap.addMarker(new MarkerOptions()
                 .position(new LatLng(pos.latitude + 0.00018, pos.longitude))
-                .icon(buildLabelBitmap(this, title, note, 0f)).flat(true).anchor(0.5f, 1.0f).zIndex(2f));
+                .icon(full).flat(true).anchor(0.5f, 1.0f).zIndex(2f));
         labelKeys.put(label, key);
+        noteFullIcons.put(label, full);
     }
 
     /** Landmark note card anchored just BELOW the icon/label; collapses to a pencil on zoom-out. */
@@ -811,18 +837,17 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         Marker label = mainMap.addMarker(new MarkerOptions()
                 .position(pos).icon(full).anchor(0.5f, 0f).zIndex(2f));
         labelKeys.put(label, key);
-        landmarkNoteFull.put(label, full);
+        noteFullIcons.put(label, full);
     }
 
     private void applyNoteZoom() {
-        if (mainMap == null || landmarkNoteFull.isEmpty()) return;
+        if (mainMap == null || noteFullIcons.isEmpty()) return;
         boolean collapse = mainMap.getCameraPosition().zoom < LABEL_ZOOM;
         if (notesCollapsed != null && notesCollapsed == collapse) return;
         notesCollapsed = collapse;
-        for (Map.Entry<Marker, BitmapDescriptor> e : landmarkNoteFull.entrySet()) {
+        for (Map.Entry<Marker, BitmapDescriptor> e : noteFullIcons.entrySet()) {
             Marker m = e.getKey();
-            if (collapse) { m.setIcon(getPencilIcon()); m.setAnchor(0.5f, 0f); }
-            else          { m.setIcon(e.getValue());    m.setAnchor(0.5f, 0f); }
+            m.setIcon(collapse ? getPencilIcon() : e.getValue());  // keep each marker's own anchor
         }
     }
 
