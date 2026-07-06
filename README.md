@@ -5,7 +5,9 @@
 **The ultimate group travel companion.** Real-time location sharing, group chats, waypoint planning, and invite management — all in one beautifully crafted Android app. Stop juggling Google Maps, Life360, and Messenger. MyWay does it all.
 
 ## 🛠 Language and Framework
-![Tech Stack](https://skills-icons.vercel.app/api/icons?i=kotlin,java,firebase,jetpackcompose,gradle)
+![Tech Stack](https://skills-icons.vercel.app/api/icons?i=kotlin,firebase,jetpackcompose,gradle)
+
+100% Kotlin + Jetpack Compose (Material3), Google Maps via `maps-compose`, Firebase Auth. No Java, no XML layouts.
 
 ## 🚀 Getting Started
 
@@ -42,17 +44,24 @@
 
 ## 📖 Project Structure
 
+Everything is Kotlin + Jetpack Compose in one flat package — no Java, no XML layouts.
+
 ```
 app/src/main/
 ├── java/com/usc/myway/
-│   ├── LoginActivity.kt / RegisterActivity.kt     # Auth screens (Compose)
-│   ├── MainActivity.java                          # Map and main navigation (XML/Java)
-│   ├── MapPickerActivity.java                     # Waypoint picker (XML/Java)
-│   ├── ShowSavedLocations.java                    # Collections and waypoint list (XML/Java)
-│   ├── App.java                                   # App singleton, local data store
-│   └── ui/theme/Theme.kt                          # Material3 theme for Compose
+│   ├── LoginActivity.kt / RegisterActivity.kt   # Auth screens (Firebase)
+│   ├── AuthComponents.kt                        # Shared auth composables
+│   ├── MainActivity.kt                          # Map home screen (maps-compose)
+│   ├── MapMarkers.kt                            # Pin/label rendering (MapMarkerManager)
+│   ├── PlaceSheets.kt                           # Marker + landmark-detail bottom sheets
+│   ├── Sidebar.kt / BottomCard.kt / SearchBar.kt # Map overlays (drawer, stats, search)
+│   ├── MapPickerActivity.kt                     # Waypoint / address picker
+│   ├── ShowSavedLocations.kt                    # Saved waypoints + collections (tabs)
+│   ├── App.kt                                   # Application singleton, local data store
+│   ├── Collection.kt                            # Collection model
+│   └── ui/theme/Theme.kt                        # Material3 theme (MyWayTheme)
 ├── res/
-│   ├── layout/                                    # XML layouts (map, collections, dialogs)
-│   ├── drawable/                                  # Icons (Google, GitHub)
-│   └── values/colors.xml, theme.xml               # Theming
+│   ├── raw/map_dark.json                        # Google Maps night style
+│   ├── drawable/, drawable-nodpi/               # Icons (Google, GitHub, launcher)
+│   └── values/                                  # colors.xml, theme.xml, strings.xml
 ```
