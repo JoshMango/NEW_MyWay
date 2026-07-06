@@ -23,11 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
 
@@ -49,17 +47,8 @@ interface SidebarActions {
     fun onGpsModeChanged(highAccuracy: Boolean)
 }
 
-object SidebarHost {
-    @JvmStatic
-    fun install(view: ComposeView, state: SidebarState, actions: SidebarActions) {
-        view.setContent {
-            MyWayTheme(darkTheme = state.darkMode) { Sidebar(state, actions) }
-        }
-    }
-}
-
 @Composable
-private fun Sidebar(state: SidebarState, actions: SidebarActions) {
+internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,

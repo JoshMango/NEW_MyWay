@@ -57,6 +57,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.AutocompletePrediction
+import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
@@ -129,11 +130,30 @@ private fun MapPickerScreen(
     var notes by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var predictions by remember { mutableStateOf<List<AutocompletePrediction>>(emptyList()) }
+    var token by remember { mutableStateOf(AutocompleteSessionToken.newInstance()) }
+    var justPicked by remember { mutableStateOf(false) }
 
     // Reverse-geocode off the main thread whenever the pin moves (tap or drag).
     androidx.compose.runtime.LaunchedEffect(markerState.position) {
         address = "Resolving address…"
         address = geocodeAddress(ctx, markerState.position)
+    }
+
+    // Debounced, session-tokened autocomplete — one request after typing stops, billed as one session.
+    androidx.compose.runtime.LaunchedEffect(query) {
+        if (justPicked) { justPicked = false; return@LaunchedEffect }
+        val q = query.trim()
+        if (q.length < 2) { predictions = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(300)
+        predictions = try {
+            withContext(Dispatchers.IO) {
+                com.google.android.gms.tasks.Tasks.await(
+                    placesClient.findAutocompletePredictions(
+                        FindAutocompletePredictionsRequest.builder().setSessionToken(token).setQuery(q).build()
+                    )
+                )
+            }.autocompletePredictions
+        } catch (e: Exception) { emptyList() }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -151,15 +171,7 @@ private fun MapPickerScreen(
             Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp)) {
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { q ->
-                        query = q
-                        if (q.trim().length >= 2) {
-                            placesClient.findAutocompletePredictions(
-                                FindAutocompletePredictionsRequest.builder().setQuery(q.trim()).build()
-                            ).addOnSuccessListener { predictions = it.autocompletePredictions }
-                                .addOnFailureListener { predictions = emptyList() }
-                        } else predictions = emptyList()
-                    },
+                    onValueChange = { query = it },
                     placeholder = { Text("Search for a place…") },
                     leadingIcon = { Text("🔍", fontSize = 16.sp) },
                     trailingIcon = {
@@ -181,16 +193,18 @@ private fun MapPickerScreen(
                         LazyColumn(Modifier.heightIn(max = 240.dp)) {
                             items(predictions) { pred ->
                                 Column(Modifier.fillMaxWidth().clickable {
+                                    justPicked = true
                                     query = pred.getPrimaryText(null).toString()
                                     predictions = emptyList()
                                     placesClient.fetchPlace(
-                                        FetchPlaceRequest.newInstance(pred.placeId, listOf(Place.Field.LAT_LNG))
+                                        FetchPlaceRequest.builder(pred.placeId, listOf(Place.Field.LAT_LNG)).setSessionToken(token).build()
                                     ).addOnSuccessListener { resp ->
                                         resp.place.latLng?.let { ll ->
                                             markerState.position = ll
                                             scope.launch { cameraState.animate(CameraUpdateFactory.newLatLngZoom(ll, 16f)) }
                                         }
                                     }
+                                    token = AutocompleteSessionToken.newInstance()
                                 }.padding(horizontal = 14.dp, vertical = 10.dp)) {
                                     Text(pred.getPrimaryText(null).toString(),
                                         fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
