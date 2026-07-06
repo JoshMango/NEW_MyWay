@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-MyWay is a native Android app being built into a group-travel companion (real-time location sharing, group chats, shared waypoints, invites). Package: `com.usc.myway`. minSdk 24, target/compileSdk 36. AGP 9.0.1 with **built-in Kotlin** (no `kotlin-android` plugin), Kotlin 2.2.10, Jetpack Compose (BOM 2026.06.00, Material3).
+MyWay is a native Android app being built into a group-travel companion (real-time location sharing, group chats, shared waypoints, invites). Package: `com.usc.myway`. minSdk 24, target/compileSdk 36. AGP 9.2.1 with **built-in Kotlin** (no `kotlin-android` plugin), Kotlin 2.2.10, Jetpack Compose (BOM 2026.06.00, Material3), `maps-compose` 6.4.1.
 
-The codebase is **mid-migration**: the auth layer is Kotlin + Jetpack Compose; everything else (map, waypoints, collections) is still Java + XML views. Data is currently local-only (`SharedPreferences` via `App.java`); Firebase Auth is live, Firestore is a declared dependency but not yet used.
+The app is **fully Kotlin + Jetpack Compose** — there are no Java files and no XML layouts. Data is local-only (`SharedPreferences` via `App.kt`); Firebase Auth is live, Firestore is a declared dependency but not yet used. Long-term the team wants a Kotlin-shared core for an eventual iOS port — but `maps-compose`, the Places SDK, FusedLocation, and Firebase are all Android-only, so that will need `expect/actual` (or a native layer) behind them.
 
 ## Build prerequisites
 
@@ -24,7 +24,6 @@ Build/test via the Gradle wrapper (`gradlew.bat` on Windows):
 - Build debug APK: `gradlew.bat assembleDebug`
 - Install to connected device/emulator: `gradlew.bat installDebug`
 - Run JVM unit tests: `gradlew.bat test`
-- Run a single unit test: `gradlew.bat test --tests "com.usc.myway.ExampleUnitTest.addition_isCorrect"`
 - Run instrumented tests (device/emulator required): `gradlew.bat connectedAndroidTest`
 - Lint: `gradlew.bat lint`
 
@@ -32,38 +31,33 @@ No CI config; only placeholder template tests exist (`app/src/test`, `app/src/an
 
 ## Architecture
 
-All code is in one flat package: `app/src/main/java/com/usc/myway/`. No `models/`/`viewmodels/`/`data/` layering, no repository pattern, no DI. Two coexisting UI styles (Compose auth, XML/Java everything-else) linked by `Intent` navigation.
+All code is in one flat package: `app/src/main/java/com/usc/myway/`. No `models/`/`viewmodels/`/`data/` layering, no repository pattern, no DI. Every screen is a `ComponentActivity` + `setContent { … }`, linked by plain `Intent` navigation (no Navigation Component). Reuse `MyWayTheme` (`ui/theme/Theme.kt`, Material3 teal, light/dark) everywhere.
 
-### Data layer — `App.java` is the local database
-The `Application` singleton (`android:name=".App"`) holds in-memory `List<Location>`, note/name `Map<String,String>`s, and `List<Collection>`, all persisted to `SharedPreferences`. Screens call `App` getters, mutate the returned live list, then manually refresh (`refreshMapMarkers()`, `notifyDataSetChanged()`, re-fetch in `onResume()`). No LiveData/Flow/observer.
+### Data layer — `App.kt` is the local database
+The `Application` singleton (`android:name=".App"`) holds in-memory `MutableList<Location>`, note/name/placeId `MutableMap<String,String>`s, and `MutableList<Collection>`, all persisted to `SharedPreferences`. There is **no LiveData/Flow/observer**: Compose screens read `App`'s live lists (`app.myLocations`, `app.locationNotes`, `app.collections`) and re-read them off a `refreshKey` Int state that's bumped after every mutation. Cross-screen live values (GPS stats, drawer switch/theme positions) live in plain state-holder classes (`StatsState`, `SidebarState`) whose properties are `mutableStateOf`; the activity writes to them.
 
-**No dedicated Waypoint class.** A waypoint is a stock `android.location.Location` joined to its name/note/collection membership by a derived string key: `App.locationKey(lat, lng)` → `"%.6f,%.6f"`. That key is the de-facto waypoint ID everywhere (`locationNotes`, `Collection.locationKeys`, prefs entry names). Add new persisted waypoint attributes as key-based side tables in `App.java`, not as model fields.
+**No dedicated Waypoint class.** A waypoint is a stock `android.location.Location` joined to its name/note/collection membership by a derived string key: `App.locationKey(lat, lng)` → `"%.6f,%.6f"`. That key is the de-facto waypoint ID everywhere (`locationNotes`, `Collection.locationKeys`, prefs entry names). Add new persisted waypoint attributes as key-based side tables in `App.kt`, not as model fields. Landmark POIs get a **placeId side table** (`App.isLandmark(key)`) so a saved landmark keeps Google's native map icon instead of getting a red pin.
 
-### Auth layer — Kotlin + Compose (the migrated slice)
-- `LoginActivity.kt` (launcher), `RegisterActivity.kt` — `ComponentActivity` + `setContent`. UI state is `mutableStateOf` held on the activity; async Firebase callbacks flip it. Rare edge dialogs (verify/link/password) reuse `MaterialAlertDialogBuilder`, not Compose.
-- `AuthComponents.kt` — shared `AuthTextField` and `SocialButton` composables.
-- `ui/theme/Theme.kt` — `MyWayTheme` (Material3, teal scheme, light/dark).
-- Firebase Auth: email/password with **required email verification** (register sends the link, sign-in is gated on `isEmailVerified`), Google Sign-In (classic `GoogleSignIn` API — deprecated but simplest; see `ponytail:` note), and GitHub via Firebase-hosted OAuth (`OAuthProvider`, no extra SDK). Social logins skip verification.
-- **Account linking**: on `FirebaseAuthUserCollisionException`, the app fetches the existing provider(s), has the user re-authenticate with their original method, then `linkWithCredential()`. Handles the email-enumeration-protection case (empty `fetchSignInMethodsForEmail`) by offering a provider chooser.
+### Screens
+- **Auth** — `LoginActivity.kt` (launcher), `RegisterActivity.kt`; `AuthComponents.kt` (`AuthTextField`, `SocialButton`). UI state is `mutableStateOf` on the activity; async Firebase callbacks flip it. Firebase Auth: email/password with **required email verification** (register sends the link, sign-in gated on `isEmailVerified`), Google Sign-In (classic `GoogleSignIn` API — deprecated but simplest), GitHub via Firebase-hosted OAuth (`OAuthProvider`). Social logins skip verification. **Account linking**: on `FirebaseAuthUserCollisionException` it re-authenticates with the original provider then `linkWithCredential()` (handles the empty-`fetchSignInMethodsForEmail` enumeration-protection case with a provider chooser). A couple of edge dialogs still use `MaterialAlertDialogBuilder`.
+- **Map home** — `MainActivity.kt`. `maps-compose` `GoogleMap`; the imperative marker/label/POI logic runs on the raw `GoogleMap` obtained via `MapEffect`. Compose overlays: gradient header, hamburger drawer (`Sidebar.kt`), search (`SearchBar.kt`), bottom stats card (`BottomCard.kt`). Location tracking uses `FusedLocationProviderClient`; permission + the two map-picker launches use `registerForActivityResult`.
+- **Waypoint/address picker** — `MapPickerActivity.kt`. `maps-compose` map with a draggable marker + Places autocomplete; returns `picked_lat`/`picked_lng`/`picked_address`/`picked_name`/`picked_notes` via the ActivityResult contract. `mode` extra is `"waypoint"` or `"address"`.
+- **Saved locations** — `ShowSavedLocations.kt`. Compose `TabRow` (All Locations / Collections) with search, empty/no-results states, waypoint & collection cards, and all edit/collection/delete dialogs.
 
-### Navigation & map interaction (XML/Java)
-Plain `Intent` navigation, no Navigation Component. `LoginActivity` → `MainActivity` (map + sidebar; **logout** lives in the sidebar, clears Firebase + Google session). `MainActivity` → `MapPickerActivity` (`startActivityForResult`, codes `MAP_PICKER_REQUEST`/`WAYPOINT_PICKER_REQUEST`) and → `ShowSavedLocations` (`ViewPager2` + `TabLayout` hosting `AllWaypointsFragment` and `CollectionsListFragment`). List taps return to `MainActivity` with `focus_lat`/`focus_lng` to recenter (`handleFocusIntent()`).
-
-**Marker interaction (important gotcha):** a Google Maps info window is a single static bitmap — you *cannot* put individually clickable buttons in it. So the flow is two-step: tap a pin → `custom_infowindow.xml` popup (title, note, an "Edit" affordance); tap the popup (`setOnInfoWindowClickListener`) → `BottomSheetDialog` (`sheet_marker_actions.xml`) with the real **Add/Edit Note** and **Delete Location** buttons. Persistent note labels are separate flat markers tracked in `labelMarkers` (guarded against in every marker listener).
-
-**Two add-pin paths** (both must save name AND note): `MapPickerActivity` waypoint mode returns `picked_name`/`picked_notes` → handled in `MainActivity.onActivityResult`; and the pin-on-map flow → `showSavePickedLocationDialog` (`dialog_savepin.xml`, has `et_pin_name` + `et_pin_notes`).
+### Map markers & interaction (`MapMarkers.kt` + `PlaceSheets.kt`)
+- `MapMarkerManager` renders markers on the raw `GoogleMap`: red pins for normal waypoints, **none** for landmarks (Google's native POI icon stays), plus note-label cards drawn as `Canvas` bitmaps. Note labels are **billboard** markers (they stay upright as the map rotates, like Google's labels) floating slightly north of the point, and they **collapse to a small pencil marker below zoom 18** (`applyNoteZoom`) so the map stays clean when zoomed out. Label/pencil bitmaps are **dark-mode aware** (the `dark` flag is threaded through `refresh`).
+- Tap a red pin or a note label → Compose `ModalBottomSheet` `MarkerActionsSheet` (title, geocoded address, Add/Edit Note, Add to Collection, Delete). Tap a Google POI icon → `PlaceDetailsSheet` (lazy photo gallery, rating, open/closed badge, hours, phone, website, reviews, plus the user's saved note). Adding a note/collection to a POI **auto-saves it as a waypoint**; Delete only appears once it's saved.
+- Which sheet/dialog is open is `mutableStateOf` state on `MainActivity` (`activeSheet` sealed type; `noteKey`/`collectionKey`/`deleteKey`/`savePinLatLng`). Mutations call `refresh()` → bumps `refreshKey` → the `MapEffect(refreshKey, dark)` re-renders markers. The pin-on-map path adds a temporary green marker then opens the save-pin dialog.
+- **Focus**: taps in the saved-locations list return to `MainActivity` with `focus_lat`/`focus_lng`; `handleFocusIntent` (called from `onResume`/`onNewIntent`) animates the camera there.
 
 ### Cross-cutting
-- **Adapters own business logic** — `WaypointAdapter`/`CollectionAdapter`/`CollectionItemAdapter` open edit/delete/add-to-collection dialogs and mutate `App` directly, then self-refresh.
-- **Dark mode** is app-controlled: `App.isDarkMode()/setDarkMode()` + `AppCompatDelegate.setDefaultNightMode()`. Map night styling is separate (`res/raw/map_dark.json` via `setMapStyle`); its `isDarkMode()` helper is duplicated in `MainActivity` and `MapPickerActivity`.
-- **Location permission** (`ACCESS_FINE_LOCATION`) uses the old `requestPermissions()`/`onRequestPermissionsResult()` API, requested only in `MainActivity`; `MapPickerActivity` checks but doesn't request.
-- **App/launcher icon** is `res/drawable-nodpi/ic_launcher_logo.png` (from `app/assets/templogo.png`), referenced directly in the manifest — not an adaptive icon, so it isn't mask-cropped. Old `mipmap/ic_launcher*` resources are unused.
+- **Dark mode** is app-controlled: `App.isDarkMode()/setDarkMode()` + `AppCompatDelegate.setDefaultNightMode()`. The drawer theme toggle flips night mode and `recreate()`s the activity. Map night styling is `MapProperties(mapStyleOptions = res/raw/map_dark.json)`; the marker note bitmaps switch palette off the same dark flag.
+- **Places cost control** (do not regress): autocomplete uses an `AutocompleteSessionToken` + 300ms debounce so a search and its final `fetchPlace` bill as one session; `fetchPlace`/`isOpen`/`fetchPhoto` results are cached (`placeCache`/`isOpenCache`/`photoCache`) and photos load lazily via `LazyRow`. Reverse-geocoding uses the free Android `Geocoder` on a background executor, deduped within ~15m.
+- **App/launcher icon** is `res/drawable-nodpi/ic_launcher_logo.png`, referenced directly in the manifest (not an adaptive icon).
 
 ## Future direction
 
-Two planned migrations — keep new work aligned with these rather than entrenching the current shortcuts:
-
-1. **XML/Java → Jetpack Compose (incremental).** Auth is done. Next candidates are self-contained screens (`ShowSavedLocations` + its fragments/adapters, then dialogs), leaving the Google Maps screen (`MainActivity`) for last (needs `maps-compose`). Reuse `MyWayTheme` and the `AuthComponents` patterns. The disabled post-login greeting logic was removed — re-add it as a Compose banner in `MainActivity` when it migrates.
-2. **Local `SharedPreferences` → Firebase (Firestore).** Move pins, notes, names, and collections out of `App.java`'s prefs storage into Firestore, scoped per user/group (users, groups, group locations/messages/waypoints). The `firebase-firestore` dependency is already present. Introduce a real data/repository layer here (this is the point to break the "`App.java` is the database" pattern) and drive UI from snapshots/Flow instead of manual `refresh*()` calls.
+1. **Local `SharedPreferences` → Firebase (Firestore).** Move pins, notes, names, placeIds, and collections out of `App.kt`'s prefs storage into Firestore, scoped per user/group (users, groups, group locations/messages/waypoints). The `firebase-firestore` dependency is already present. Introduce a real data/repository layer here (the point to break the "`App.kt` is the database" pattern) and drive UI from snapshots/Flow instead of manual `refresh()` calls.
+2. **iOS via Kotlin Multiplatform.** UI is Compose and the data layer (`App.kt`/`Collection.kt`) is Kotlin, but `maps-compose`, the Places SDK, FusedLocation, and Firebase are Android-only — an iOS port needs `expect/actual` abstractions (or a native map/location layer) behind those before any code is shared.
 
 When adding features that touch data, prefer designing them so the Firestore migration is easier (e.g., don't add more prefs-key side tables than necessary).

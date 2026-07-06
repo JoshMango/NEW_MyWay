@@ -22,16 +22,21 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -89,7 +96,6 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 private val Teal = Color(0xFF00C99D)
-private val TealDeep = Color(0xFF00A77D)
 
 private sealed interface ActiveSheet {
     data class PinActions(val key: String, val title: String, val latLng: LatLng) : ActiveSheet
@@ -127,7 +133,6 @@ class MainActivity : ComponentActivity() {
     private val sidebar = SidebarState()
     private var hasLocationPerm by mutableStateOf(false)
     private var drawerOpen by mutableStateOf(false)
-    private var waypointCount by mutableIntStateOf(0)
     private var refreshKey by mutableIntStateOf(0)
     private var activeSheet by mutableStateOf<ActiveSheet?>(null)
     private var noteKey by mutableStateOf<String?>(null)
@@ -155,7 +160,6 @@ class MainActivity : ComponentActivity() {
         setupLocationRequest()
 
         sidebar.darkMode = isDarkMode(); sidebar.tracking = true; sidebar.gpsHighAccuracy = false
-        waypointCount = app.myLocations.size
         hasLocationPerm = hasLocationPermission()
         if (!hasLocationPerm) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         else startLocationUpdates()
@@ -195,7 +199,10 @@ class MainActivity : ComponentActivity() {
                 mapStyleOptions = if (dark) MapStyleOptions.loadRawResourceStyle(this, R.raw.map_dark) else null,
             )
         }
-        val uiSettings = remember { MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true, compassEnabled = true, mapToolbarEnabled = false) }
+        // Native compass + my-location button off — we render our own above the bottom card.
+        val uiSettings = remember { MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false, compassEnabled = false, mapToolbarEnabled = false) }
+        // derivedStateOf so overlays recompose only when the bearing actually changes (not on pan/zoom).
+        val bearing by remember { derivedStateOf { cam.position.bearing } }
 
         Box(Modifier.fillMaxSize()) {
             GoogleMap(
@@ -203,6 +210,7 @@ class MainActivity : ComponentActivity() {
                 cameraPositionState = cam,
                 properties = mapProps,
                 uiSettings = uiSettings,
+                contentPadding = PaddingValues(bottom = 150.dp), // keep Google logo above the bottom card
                 onPOIClick = { poi -> centerOn(poi.latLng); fetchAndShowPlace(poi.placeId, poi.name, poi.latLng) },
                 onMapClick = { ll -> if (stats.pinMode) onPinMapClick(ll) },
             ) {
@@ -218,34 +226,47 @@ class MainActivity : ComponentActivity() {
                 MapEffect(refreshKey, dark) { map -> markers.refresh(map, app, dark) }
             }
 
-            // Top overlays stack in a Column so search/drawer sit BELOW the header (no magic offsets).
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth()) {
-                Header(waypointCount)
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface).clickable { drawerOpen = !drawerOpen },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("☰", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) }
-                    Spacer(Modifier.width(8.dp))
-                    Box(Modifier.weight(1f)) {
-                        SearchBar(placesClient, PlacePickedListener { ll -> animateTo(ll, 16f) })
-                    }
+            // Top: floating hamburger + search only.
+            Row(
+                Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding()
+                    .padding(start = 10.dp, end = 12.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(48.dp).shadow(4.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+                        .clickable { drawerOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) { Text("☰", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) }
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f)) {
+                    SearchBar(placesClient, PlacePickedListener { ll -> animateTo(ll, 16f) })
                 }
-                AnimatedVisibility(
-                    visible = drawerOpen,
-                    enter = slideInHorizontally { -it } + fadeIn(),
-                    exit = slideOutHorizontally { -it } + fadeOut(),
-                ) { Box(Modifier.padding(start = 10.dp, top = 8.dp).width(200.dp)) { Sidebar(sidebar, sidebarActions) } }
             }
 
-            // Bottom card
-            Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 12.dp)) {
+            // Bottom: map controls (compass + my-location) sit at the top-right, above the card.
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp)) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
+                    MapControls(
+                        bearing = bearing,
+                        onCompass = { scope.launch { cam.animate(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cam.position).bearing(0f).tilt(0f).build())) } },
+                        onMyLocation = { if (savedLat != 0.0 || savedLng != 0.0) animateTo(LatLng(savedLat, savedLng), 17f) },
+                    )
+                }
                 BottomCard(stats, statsActions)
             }
+
+            // Drawer: full-screen scrim + slide-in panel.
+            AnimatedVisibility(drawerOpen, enter = fadeIn(), exit = fadeOut()) {
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { drawerOpen = false })
+            }
+            AnimatedVisibility(
+                visible = drawerOpen,
+                enter = slideInHorizontally { -it },
+                exit = slideOutHorizontally { -it },
+                modifier = Modifier.align(Alignment.TopStart),
+            ) { Sidebar(sidebar, sidebarActions) }
 
             Sheets()
             Dialogs()
@@ -253,22 +274,22 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Header(count: Int) {
-        Row(
-            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Teal, TealDeep)))
-                .statusBarsPadding().padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("MyWay", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Row(
-                Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.2f))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("$count", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(" waypoints", color = Color.White, fontSize = 12.sp)
+    private fun MapControls(bearing: Float, onCompass: () -> Unit, onMyLocation: () -> Unit) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (bearing != 0f) {
+                CircleButton(onCompass) { Text("🧭", fontSize = 20.sp, modifier = Modifier.rotate(-bearing)) }
             }
+            CircleButton(onMyLocation) { Text("📍", fontSize = 18.sp) }
         }
+    }
+
+    @Composable
+    private fun CircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+        Box(
+            Modifier.size(44.dp).shadow(4.dp, CircleShape).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { content() }
     }
 
     @Composable
@@ -532,7 +553,6 @@ class MainActivity : ComponentActivity() {
         stats.altitude = if (loc.hasAltitude()) String.format("%.1fm", loc.altitude) else "N/A"
         stats.speed = if (loc.hasSpeed()) String.format("%.1fkm/h", loc.speed * 3.6f) else "0km/h"
         maybeGeocodeAddress(savedLat, savedLng)
-        waypointCount = app.myLocations.size
         if (firstFix && savedLat != 0.0) { camState?.move(CameraUpdateFactory.newLatLngZoom(LatLng(savedLat, savedLng), 18f)); firstFix = false }
     }
 
@@ -609,7 +629,7 @@ class MainActivity : ComponentActivity() {
         finish()
     }
 
-    private fun refresh() { refreshKey++; waypointCount = app.myLocations.size }
+    private fun refresh() { refreshKey++ }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
 

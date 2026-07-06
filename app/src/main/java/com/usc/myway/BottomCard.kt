@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -58,7 +57,7 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
         shadowElevation = 12.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
             // Address
             Row(verticalAlignment = Alignment.Top) {
                 Text("📍", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
