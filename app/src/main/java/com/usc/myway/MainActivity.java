@@ -25,6 +25,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -84,8 +85,20 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private GoogleMap mainMap;
     private boolean mapReady = false;
     private boolean firstFix = true;
-    private final Map<Marker, String> markerKeys  = new HashMap<>();
-    private final Map<Marker, Marker> labelMarkers = new HashMap<>();
+    private final Map<Marker, String> markerKeys  = new HashMap<>();  // red pins -> key (normal pins only)
+    private final Map<Marker, String> labelKeys   = new HashMap<>();  // floating note labels -> key
+
+    // Landmark note labels collapse to a small pencil marker below this zoom (matches when
+    // Google hides its own POI labels), and expand back to the full card above it.
+    private static final float LABEL_ZOOM = 17f;
+    private final Map<Marker, BitmapDescriptor> landmarkNoteFull = new HashMap<>(); // marker -> full card icon
+    private BitmapDescriptor pencilIcon;
+    private Boolean notesCollapsed = null;
+
+    // Session caches so re-tapping a landmark doesn't re-bill fetchPlace / isOpen / fetchPhoto.
+    private final Map<String, Place> placeCache   = new HashMap<>();
+    private final Map<String, Bitmap> photoCache  = new HashMap<>();
+    private final Map<String, Boolean> isOpenCache = new HashMap<>();
 
     private TextView tv_lat, tv_lon, tv_alt, tv_accuracy, tv_speed,
             tv_address, tv_savedAdd, tv_waypointCounts, tv_toggletheme, tv_pin_label;
@@ -269,20 +282,26 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             });
         }
         
-        // Tapping a pin (or its floating note label) opens the actions sheet directly.
+        // Tapping a pin (or its floating note label) opens the right sheet directly.
         // The old info-window -> info-window-click hop was unreliable: taps landed on the
         // overlapping label marker or a partly off-screen info window and silently did nothing.
         mainMap.setOnMarkerClickListener(m -> {
-            Marker pin = labelMarkers.containsValue(m) ? pinForLabel(m) : m;
-            if (pin != null) showMarkerActions(pin);
+            if (markerKeys.containsKey(m)) {           // a normal red pin
+                showMarkerActions(m);
+            } else if (labelKeys.containsKey(m)) {     // a floating note label
+                openForKey(labelKeys.get(m));
+            }
             return true;
         });
         // Tapping one of Google's built-in landmark icons -> rich details sheet.
         mainMap.setOnPoiClickListener(this::showPoiDetails);
+        // Collapse/expand landmark note cards as the user zooms.
+        mainMap.setOnCameraIdleListener(this::applyNoteZoom);
         refreshMapMarkers();
     }
 
     private void showMarkerActions(Marker marker) {
+        centerOn(marker.getPosition());
         App myApp = (App) getApplicationContext();
         String key = markerKeys.getOrDefault(marker, "");
         View sheet = getLayoutInflater().inflate(R.layout.sheet_marker_actions, null);
@@ -291,6 +310,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         TextView tvNote = sheet.findViewById(R.id.tv_sheet_note);
         if (!note.isEmpty()) { tvNote.setVisibility(View.VISIBLE); tvNote.setText("📝 " + note); }
         else { tvNote.setVisibility(View.GONE); }
+
+        // Address (reverse-geocoded off the main thread).
+        geocodeInto(sheet.findViewById(R.id.tv_sheet_address), marker.getPosition());
 
         com.google.android.material.bottomsheet.BottomSheetDialog dialog =
                 new com.google.android.material.bottomsheet.BottomSheetDialog(this);
@@ -301,10 +323,38 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         dialog.show();
     }
 
-    private Marker pinForLabel(Marker label) {
-        for (Map.Entry<Marker, Marker> e : labelMarkers.entrySet())
-            if (e.getValue().equals(label)) return e.getKey();
+    private void geocodeInto(TextView tv, LatLng ll) {
+        new Thread(() -> {
+            try {
+                List<Address> addrs = new Geocoder(this).getFromLocation(ll.latitude, ll.longitude, 1);
+                if (addrs != null && !addrs.isEmpty()) {
+                    String line = addrs.get(0).getAddressLine(0);
+                    runOnUiThread(() -> { tv.setVisibility(View.VISIBLE); tv.setText("📍 " + line); });
+                }
+            } catch (Exception ignored) { /* offline / no geocoder */ }
+        }).start();
+    }
+
+    private Marker pinForKey(String key) {
+        for (Map.Entry<Marker, String> e : markerKeys.entrySet())
+            if (e.getValue().equals(key)) return e.getKey();
         return null;
+    }
+
+    /** Route a tap on a note label to the right sheet: landmark details vs. normal-pin actions. */
+    private void openForKey(String key) {
+        App myApp = (App) getApplicationContext();
+        if (myApp.isLandmark(key)) {
+            String[] parts = key.split(",");
+            try {
+                LatLng ll = new LatLng(Double.parseDouble(parts[0].trim()), Double.parseDouble(parts[1].trim()));
+                centerOn(ll);
+                fetchAndShowPlace(myApp.getLocationPlaceId(key), myApp.getLocationName(key), ll);
+            } catch (Exception ignored) { }
+        } else {
+            Marker pin = pinForKey(key);
+            if (pin != null) showMarkerActions(pin);
+        }
     }
 
     private void showAddToCollectionDialog(String key) {
@@ -380,13 +430,29 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     // ── Landmark (POI) details ────────────────────────────────────────────────
 
     private void showPoiDetails(com.google.android.gms.maps.model.PointOfInterest poi) {
+        centerOn(poi.latLng);
+        fetchAndShowPlace(poi.placeId, poi.name, poi.latLng);
+    }
+
+    /** Slide the tapped pin/landmark to the middle of the screen, like the Google Maps app. */
+    private void centerOn(LatLng ll) {
+        if (mainMap != null && ll != null) mainMap.animateCamera(CameraUpdateFactory.newLatLng(ll));
+    }
+
+    private void fetchAndShowPlace(String placeId, String name, LatLng latlng) {
+        Place cached = placeCache.get(placeId);
+        if (cached != null) { showPlaceSheet(cached, name, latlng); return; }
         List<Place.Field> fields = Arrays.asList(
-                Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG,
+                Place.Field.ID, Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG,
                 Place.Field.RATING, Place.Field.USER_RATINGS_TOTAL, Place.Field.PRICE_LEVEL,
-                Place.Field.OPENING_HOURS, Place.Field.PHONE_NUMBER, Place.Field.WEBSITE_URI,
-                Place.Field.REVIEWS);
-        placesClient.fetchPlace(FetchPlaceRequest.newInstance(poi.placeId, fields))
-                .addOnSuccessListener(resp -> showPlaceSheet(resp.getPlace(), poi.name, poi.latLng))
+                Place.Field.OPENING_HOURS, Place.Field.CURRENT_OPENING_HOURS, Place.Field.UTC_OFFSET,
+                Place.Field.BUSINESS_STATUS, Place.Field.PHONE_NUMBER, Place.Field.WEBSITE_URI,
+                Place.Field.REVIEWS, Place.Field.PHOTO_METADATAS);
+        placesClient.fetchPlace(FetchPlaceRequest.newInstance(placeId, fields))
+                .addOnSuccessListener(resp -> {
+                    placeCache.put(placeId, resp.getPlace());
+                    showPlaceSheet(resp.getPlace(), name, latlng);
+                })
                 .addOnFailureListener(e ->
                         Toast.makeText(this, "Couldn't load place details.", Toast.LENGTH_SHORT).show());
     }
@@ -400,11 +466,13 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         View sheet = getLayoutInflater().inflate(R.layout.sheet_place_details, null);
         ((TextView) sheet.findViewById(R.id.tv_place_name)).setText(name);
 
-        // Rating · price
+        loadPhotos(place, sheet);
+
+        // Rating (stars) · price
         TextView tvRating = sheet.findViewById(R.id.tv_place_rating);
         StringBuilder rp = new StringBuilder();
         if (place.getRating() != null) {
-            rp.append("⭐ ").append(place.getRating());
+            rp.append(String.format("%.1f ", place.getRating())).append(starString(place.getRating()));
             if (place.getUserRatingsTotal() != null)
                 rp.append(" (").append(place.getUserRatingsTotal()).append(")");
         }
@@ -414,11 +482,20 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
         if (rp.length() > 0) { tvRating.setVisibility(View.VISIBLE); tvRating.setText(rp.toString()); }
 
+        showOpenStatus(place, sheet.findViewById(R.id.tv_place_status));
+
+        // User's saved note — persists until the location is deleted.
+        String userNote = ((App) getApplicationContext()).getLocationNotes().getOrDefault(key, "");
+        if (!userNote.isEmpty()) {
+            TextView tvNote = sheet.findViewById(R.id.tv_place_note);
+            tvNote.setVisibility(View.VISIBLE);
+            tvNote.setText("📝 " + userNote);
+        }
+
         // Address
         if (place.getAddress() != null && !place.getAddress().isEmpty()) {
-            TextView tvAddr = sheet.findViewById(R.id.tv_place_address);
-            tvAddr.setVisibility(View.VISIBLE);
-            tvAddr.setText("📍 " + place.getAddress());
+            sheet.findViewById(R.id.row_address).setVisibility(View.VISIBLE);
+            ((TextView) sheet.findViewById(R.id.tv_place_address)).setText(place.getAddress());
         }
 
         // Hours
@@ -431,7 +508,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // Phone (tap to dial)
         if (place.getPhoneNumber() != null && !place.getPhoneNumber().isEmpty()) {
-            View row = sheet.findViewById(R.id.btn_place_phone);
+            View row = sheet.findViewById(R.id.row_phone);
             row.setVisibility(View.VISIBLE);
             ((TextView) sheet.findViewById(R.id.tv_place_phone)).setText(place.getPhoneNumber());
             row.setOnClickListener(v -> startActivity(
@@ -440,7 +517,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // Website (tap to open)
         if (place.getWebsiteUri() != null) {
-            View row = sheet.findViewById(R.id.btn_place_website);
+            View row = sheet.findViewById(R.id.row_website);
             row.setVisibility(View.VISIBLE);
             ((TextView) sheet.findViewById(R.id.tv_place_website)).setText(place.getWebsiteUri().toString());
             row.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW, place.getWebsiteUri())));
@@ -475,17 +552,112 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // Actions — note/collection auto-save the landmark as a waypoint first.
         sheet.findViewById(R.id.btn_place_note).setOnClickListener(v -> {
-            dialog.dismiss(); ensureSaved(ll, name); showNoteDialog(key);
+            dialog.dismiss(); ensureSaved(ll, name, place.getId()); showNoteDialog(key);
         });
         sheet.findViewById(R.id.btn_place_collection).setOnClickListener(v -> {
-            dialog.dismiss(); ensureSaved(ll, name); showAddToCollectionDialog(key);
+            dialog.dismiss(); ensureSaved(ll, name, place.getId()); showAddToCollectionDialog(key);
         });
-        sheet.findViewById(R.id.btn_place_delete).setOnClickListener(v -> {
-            dialog.dismiss();
-            if (isSaved(key)) confirmDelete(key);
-            else Toast.makeText(this, "This place isn't saved yet.", Toast.LENGTH_SHORT).show();
-        });
+        // Delete only exists once the place is "yours" (has a note or is in a collection).
+        View delete = sheet.findViewById(R.id.btn_place_delete);
+        if (isSaved(key)) {
+            delete.setVisibility(View.VISIBLE);
+            delete.setOnClickListener(v -> { dialog.dismiss(); confirmDelete(key); });
+        }
         dialog.show();
+    }
+
+    private String starString(double rating) {
+        int full = (int) Math.round(rating);
+        StringBuilder s = new StringBuilder();
+        for (int i = 0; i < 5; i++) s.append(i < full ? "★" : "☆");
+        return s.toString();
+    }
+
+    private void loadPhotos(Place place, View sheet) {
+        List<com.google.android.libraries.places.api.model.PhotoMetadata> photos = place.getPhotoMetadatas();
+        if (photos == null || photos.isEmpty()) return;
+        HorizontalScrollView sv = sheet.findViewById(R.id.sv_photos);
+        sv.setVisibility(View.VISIBLE);
+        LinearLayout container = sheet.findViewById(R.id.ll_photos);
+        float d = getResources().getDisplayMetrics().density;
+        int w = (int) (240 * d), h = (int) (160 * d), gap = (int) (10 * d);
+        int max = Math.min(photos.size(), 6);
+        String placeId = place.getId() != null ? place.getId() : String.valueOf(System.identityHashCode(place));
+        final android.widget.ImageView[] views = new android.widget.ImageView[max];
+
+        for (int i = 0; i < max; i++) {
+            androidx.cardview.widget.CardView card = new androidx.cardview.widget.CardView(this);
+            card.setRadius(14 * d);
+            card.setCardElevation(0);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(w, h);
+            if (i < max - 1) clp.rightMargin = gap;
+            card.setLayoutParams(clp);
+            android.widget.ImageView iv = new android.widget.ImageView(this);
+            iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            iv.setBackgroundColor(0xFFE2E8F0);
+            card.addView(iv, new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+            container.addView(card);
+            views[i] = iv;
+
+            String ck = placeId + "#" + i;
+            if (photoCache.containsKey(ck)) iv.setImageBitmap(photoCache.get(ck));
+            else if (i == 0) fetchPhotoInto(ck, photos.get(i), iv);  // hero loads eagerly
+            // remaining photos are deferred until the user scrolls the strip
+        }
+
+        // Lazy: fetch the rest only once the user actually scrolls the gallery.
+        final boolean[] loadedRest = {false};
+        sv.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+            if (loadedRest[0]) return;
+            loadedRest[0] = true;
+            for (int i = 1; i < max; i++) {
+                String ck = placeId + "#" + i;
+                if (!photoCache.containsKey(ck)) fetchPhotoInto(ck, photos.get(i), views[i]);
+            }
+        });
+    }
+
+    private void fetchPhotoInto(String cacheKey,
+                               com.google.android.libraries.places.api.model.PhotoMetadata meta,
+                               android.widget.ImageView iv) {
+        com.google.android.libraries.places.api.net.FetchPhotoRequest req =
+                com.google.android.libraries.places.api.net.FetchPhotoRequest.builder(meta)
+                        .setMaxWidth(600).setMaxHeight(400).build();
+        placesClient.fetchPhoto(req).addOnSuccessListener(r -> {
+            photoCache.put(cacheKey, r.getBitmap());
+            iv.setImageBitmap(r.getBitmap());
+        });
+    }
+
+    private void showOpenStatus(Place place, TextView tv) {
+        Place.BusinessStatus status = place.getBusinessStatus();
+        if (status == Place.BusinessStatus.CLOSED_PERMANENTLY) { setStatus(tv, "Permanently closed", false); return; }
+        if (status == Place.BusinessStatus.CLOSED_TEMPORARILY) { setStatus(tv, "Temporarily closed", false); return; }
+        String id = place.getId();
+        if (id != null && isOpenCache.containsKey(id)) {
+            boolean open = isOpenCache.get(id);
+            setStatus(tv, open ? "Open now" : "Closed", open);
+            return;
+        }
+        // "Open now" needs a live check against the place's hours + timezone.
+        try {
+            com.google.android.libraries.places.api.net.IsOpenRequest req =
+                    com.google.android.libraries.places.api.net.IsOpenRequest.newInstance(place);
+            placesClient.isOpen(req).addOnSuccessListener(resp -> {
+                if (resp.isOpen() != null) {
+                    if (id != null) isOpenCache.put(id, resp.isOpen());
+                    setStatus(tv, resp.isOpen() ? "Open now" : "Closed", resp.isOpen());
+                }
+            });
+        } catch (Exception ignored) { /* missing fields -> just hide the badge */ }
+    }
+
+    private void setStatus(TextView tv, String text, boolean open) {
+        tv.setVisibility(View.VISIBLE);
+        tv.setText(text);
+        tv.setTextColor(open ? 0xFF16A34A : 0xFFEF4444);
     }
 
     private boolean isSaved(String key) {
@@ -494,15 +666,16 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         return false;
     }
 
-    /** Persist a tapped landmark as a waypoint (with its name) if not already saved. */
-    private void ensureSaved(LatLng ll, String name) {
-        if (isSaved(App.locationKey(ll.latitude, ll.longitude))) return;
+    /** Persist a tapped landmark as a waypoint (name + placeId) if not already saved. */
+    private void ensureSaved(LatLng ll, String name, String placeId) {
+        String key = App.locationKey(ll.latitude, ll.longitude);
+        if (isSaved(key)) return;
         App myApp = (App) getApplicationContext();
         Location loc = new Location("poi");
         loc.setLatitude(ll.latitude); loc.setLongitude(ll.longitude);
         myApp.saveLocation(loc);
-        if (name != null && !name.isEmpty())
-            myApp.saveLocationName(App.locationKey(ll.latitude, ll.longitude), name);
+        if (name != null && !name.isEmpty()) myApp.saveLocationName(key, name);
+        if (placeId != null && !placeId.isEmpty()) myApp.saveLocationPlaceId(key, placeId);
         refreshMapMarkers();
         Toast.makeText(this, "Saved to waypoints", Toast.LENGTH_SHORT).show();
     }
@@ -596,34 +769,125 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private void refreshMapMarkers() {
         if (mainMap == null) return;
-        for (Marker m : markerKeys.keySet()) m.remove(); for (Marker m : labelMarkers.values()) m.remove();
-        markerKeys.clear(); labelMarkers.clear();
+        for (Marker m : markerKeys.keySet()) m.remove();
+        for (Marker m : labelKeys.keySet()) m.remove();
+        markerKeys.clear(); labelKeys.clear(); landmarkNoteFull.clear();
+        notesCollapsed = null;
         App myApp = (App) getApplicationContext();
         for (Location loc : myApp.getMyLocations()) {
             String key = App.locationKey(loc.getLatitude(), loc.getLongitude());
             String name = myApp.getLocationName(key);
-            String title = name.isEmpty() ? String.format("%.5f, %.5f", loc.getLatitude(), loc.getLongitude()) : name;
-            Marker marker = mainMap.addMarker(new MarkerOptions().position(new LatLng(loc.getLatitude(), loc.getLongitude())).title(title).icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
-            markerKeys.put(marker, key);
             String note = myApp.getLocationNotes().getOrDefault(key, "");
-            if (!note.isEmpty()) addLabelMarker(marker, note);
+            LatLng pos = new LatLng(loc.getLatitude(), loc.getLongitude());
+
+            if (myApp.isLandmark(key)) {
+                // Landmark: keep Google's native icon (no red pin). Note card sits below it.
+                if (!note.isEmpty()) addLandmarkNoteLabel(pos, note, key);
+            } else {
+                String title = name.isEmpty()
+                        ? String.format("%.5f, %.5f", loc.getLatitude(), loc.getLongitude()) : name;
+                Marker marker = mainMap.addMarker(new MarkerOptions().position(pos).title(title)
+                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
+                markerKeys.put(marker, key);
+                if (!note.isEmpty()) addPinNoteLabel(pos, title, note, key);
+            }
+        }
+        applyNoteZoom();
+    }
+
+    /** Note card floating above a red pin (title + note). */
+    private void addPinNoteLabel(LatLng pos, String title, String note, String key) {
+        Marker label = mainMap.addMarker(new MarkerOptions()
+                .position(new LatLng(pos.latitude + 0.00018, pos.longitude))
+                .icon(buildLabelBitmap(this, title, note, 0f)).flat(true).anchor(0.5f, 1.0f).zIndex(2f));
+        labelKeys.put(label, key);
+    }
+
+    /** Landmark note card anchored just BELOW the icon/label; collapses to a pencil on zoom-out. */
+    private void addLandmarkNoteLabel(LatLng pos, String note, String key) {
+        float d = getResources().getDisplayMetrics().density;
+        // Transparent top-padding gives a constant pixel gap that clears Google's icon + label.
+        BitmapDescriptor full = buildLabelBitmap(this, "", note, 22 * d);
+        Marker label = mainMap.addMarker(new MarkerOptions()
+                .position(pos).icon(full).anchor(0.5f, 0f).zIndex(2f));
+        labelKeys.put(label, key);
+        landmarkNoteFull.put(label, full);
+    }
+
+    private void applyNoteZoom() {
+        if (mainMap == null || landmarkNoteFull.isEmpty()) return;
+        boolean collapse = mainMap.getCameraPosition().zoom < LABEL_ZOOM;
+        if (notesCollapsed != null && notesCollapsed == collapse) return;
+        notesCollapsed = collapse;
+        for (Map.Entry<Marker, BitmapDescriptor> e : landmarkNoteFull.entrySet()) {
+            Marker m = e.getKey();
+            if (collapse) { m.setIcon(getPencilIcon()); m.setAnchor(0.5f, 0f); }
+            else          { m.setIcon(e.getValue());    m.setAnchor(0.5f, 0f); }
         }
     }
 
-    private void addLabelMarker(Marker pinMarker, String note) {
-        LatLng pos = pinMarker.getPosition();
-        Marker label = mainMap.addMarker(new MarkerOptions().position(new LatLng(pos.latitude + 0.00018, pos.longitude)).icon(buildLabelBitmap(this, pinMarker.getTitle(), note)).flat(true).anchor(0.5f, 1.0f).zIndex(2f));
-        labelMarkers.put(pinMarker, label);
+    private BitmapDescriptor getPencilIcon() {
+        if (pencilIcon == null) pencilIcon = buildPencilBitmap(this);
+        return pencilIcon;
     }
 
-    private static BitmapDescriptor buildLabelBitmap(Context ctx, String title, String note) {
-        float dp = ctx.getResources().getDisplayMetrics().density; float pad = 10 * dp;
-        Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG); tp.setTextSize(11*dp); tp.setTypeface(Typeface.DEFAULT_BOLD);
-        Paint np = new Paint(Paint.ANTI_ALIAS_FLAG); np.setTextSize(10*dp); np.setColor(Color.BLUE);
-        float w = Math.max(tp.measureText(title), np.measureText(note)) + pad * 2; float h = 40 * dp;
-        Bitmap bmp = Bitmap.createBitmap((int) w, (int) h, Bitmap.Config.ARGB_8888); Canvas c = new Canvas(bmp);
-        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG); bg.setColor(Color.WHITE); c.drawRoundRect(new RectF(0, 0, w, h-8*dp), 8*dp, 8*dp, bg);
-        c.drawText(title, pad, 15*dp, tp); c.drawText(note, pad, 28*dp, np);
+    /** Small white circle with a pencil — the collapsed state of a landmark note. */
+    private static BitmapDescriptor buildPencilBitmap(Context ctx) {
+        float d = ctx.getResources().getDisplayMetrics().density;
+        int size = (int) (32 * d);
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(Color.WHITE);
+        bg.setShadowLayer(4 * d, 0, 1 * d, 0x33000000);
+        c.drawCircle(size / 2f, size / 2f, size / 2f - 5 * d, bg);
+        Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        tp.setTextSize(15 * d);
+        tp.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics fm = tp.getFontMetrics();
+        c.drawText("✏️", size / 2f, size / 2f - (fm.ascent + fm.descent) / 2f, tp);
+        return BitmapDescriptorFactory.fromBitmap(bmp);
+    }
+
+    /** Modern rounded note card: white pill, soft shadow, dark title, teal note. topPad reserves
+     *  transparent space above the card so an anchor(0.5,0) marker sits below the map point. */
+    private static BitmapDescriptor buildLabelBitmap(Context ctx, String title, String note, float topPad) {
+        float d = ctx.getResources().getDisplayMetrics().density;
+        float padH = 12 * d, padV = 9 * d, lineGap = 4 * d, shadow = 6 * d, radius = 12 * d;
+        boolean hasTitle = title != null && !title.isEmpty();
+        boolean hasNote  = note != null && !note.isEmpty();
+        String noteText = hasNote ? "📝 " + note : "";
+
+        Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        tp.setTextSize(12 * d); tp.setTypeface(Typeface.DEFAULT_BOLD); tp.setColor(0xFF1E293B);
+        Paint np = new Paint(Paint.ANTI_ALIAS_FLAG);
+        np.setTextSize(11 * d); np.setColor(0xFF00A77D); // teal, not blue
+
+        float textW = 0;
+        if (hasTitle) textW = Math.max(textW, tp.measureText(title));
+        if (hasNote)  textW = Math.max(textW, np.measureText(noteText));
+        Paint.FontMetrics tm = tp.getFontMetrics(), nm = np.getFontMetrics();
+        float titleH = hasTitle ? (tm.descent - tm.ascent) : 0;
+        float noteH  = hasNote  ? (nm.descent - nm.ascent) : 0;
+        float gap = (hasTitle && hasNote) ? lineGap : 0;
+
+        float cardW = textW + padH * 2;
+        float cardH = padV * 2 + titleH + noteH + gap;
+        float w = cardW + shadow * 2, h = cardH + shadow * 2 + topPad;
+
+        Bitmap bmp = Bitmap.createBitmap((int) Math.ceil(w), (int) Math.ceil(h), Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(Color.WHITE);
+        bg.setShadowLayer(shadow, 0, 2 * d, 0x33000000);
+        c.drawRoundRect(new RectF(shadow, shadow + topPad, w - shadow, h - shadow), radius, radius, bg);
+
+        float x = shadow + padH, top = shadow + topPad + padV;
+        if (hasTitle) {
+            c.drawText(title, x, top - tm.ascent, tp);
+            top += titleH + gap;
+        }
+        if (hasNote) c.drawText(noteText, x, top - nm.ascent, np);
         return BitmapDescriptorFactory.fromBitmap(bmp);
     }
 
