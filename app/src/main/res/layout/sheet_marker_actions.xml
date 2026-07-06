@@ -49,6 +49,27 @@
             android:textStyle="bold" />
     </LinearLayout>
 
+    <!-- Add to Collection -->
+    <LinearLayout
+        android:id="@+id/btn_add_collection"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/data_background"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📁  Add to Collection"
+            android:textColor="@color/teal_dark"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Delete Location -->
     <LinearLayout
         android:id="@+id/btn_delete_location"

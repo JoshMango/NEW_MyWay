@@ -269,18 +269,16 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             });
         }
         
-        mainMap.setInfoWindowAdapter(new GoogleMap.InfoWindowAdapter() {
-            @Override public View getInfoWindow(Marker m) { return labelMarkers.containsValue(m) ? null : buildInfoWindow(m); }
-            @Override public View getInfoContents(Marker m) { return null; }
-        });
+        // Tapping a pin (or its floating note label) opens the actions sheet directly.
+        // The old info-window -> info-window-click hop was unreliable: taps landed on the
+        // overlapping label marker or a partly off-screen info window and silently did nothing.
         mainMap.setOnMarkerClickListener(m -> {
-            if (labelMarkers.containsValue(m)) return true;
-            m.showInfoWindow();
+            Marker pin = labelMarkers.containsValue(m) ? pinForLabel(m) : m;
+            if (pin != null) showMarkerActions(pin);
             return true;
         });
-        mainMap.setOnInfoWindowClickListener(m -> {
-            if (!labelMarkers.containsValue(m)) showMarkerActions(m);
-        });
+        // Tapping one of Google's built-in landmark icons -> rich details sheet.
+        mainMap.setOnPoiClickListener(this::showPoiDetails);
         refreshMapMarkers();
     }
 
@@ -297,17 +295,53 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         com.google.android.material.bottomsheet.BottomSheetDialog dialog =
                 new com.google.android.material.bottomsheet.BottomSheetDialog(this);
         dialog.setContentView(sheet);
-        sheet.findViewById(R.id.btn_add_note).setOnClickListener(v -> { dialog.dismiss(); showNoteDialog(marker); });
-        sheet.findViewById(R.id.btn_delete_location).setOnClickListener(v -> { dialog.dismiss(); confirmDelete(marker); });
+        sheet.findViewById(R.id.btn_add_note).setOnClickListener(v -> { dialog.dismiss(); showNoteDialog(key); });
+        sheet.findViewById(R.id.btn_add_collection).setOnClickListener(v -> { dialog.dismiss(); showAddToCollectionDialog(key); });
+        sheet.findViewById(R.id.btn_delete_location).setOnClickListener(v -> { dialog.dismiss(); confirmDelete(key); });
         dialog.show();
     }
 
-    private void confirmDelete(Marker marker) {
+    private Marker pinForLabel(Marker label) {
+        for (Map.Entry<Marker, Marker> e : labelMarkers.entrySet())
+            if (e.getValue().equals(label)) return e.getKey();
+        return null;
+    }
+
+    private void showAddToCollectionDialog(String key) {
+        App myApp = (App) getApplicationContext();
+        List<Collection> collections = myApp.getCollections();
+        if (collections.isEmpty()) {
+            Toast.makeText(this, "No collections yet — create one in Saved Waypoints.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        // A pin belongs to at most one collection (same as the waypoint edit screen).
+        String[] options = new String[collections.size() + 1];
+        options[0] = "❌ None";
+        for (int i = 0; i < collections.size(); i++) {
+            Collection c = collections.get(i);
+            options[i + 1] = c.icon + " " + c.name + (c.locationKeys.contains(key) ? "  ✓" : "");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Add to Collection")
+                .setItems(options, (d, which) -> {
+                    for (Collection c : collections) c.locationKeys.remove(key);
+                    if (which > 0) {
+                        Collection chosen = collections.get(which - 1);
+                        chosen.locationKeys.add(key);
+                        Toast.makeText(this, "Added to " + chosen.name, Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "Removed from collection", Toast.LENGTH_SHORT).show();
+                    }
+                    myApp.saveCollectionsToPrefs();
+                })
+                .show();
+    }
+
+    private void confirmDelete(String key) {
         new AlertDialog.Builder(this)
                 .setTitle("Delete Waypoint")
                 .setMessage("Are you sure you want to delete this location?")
                 .setPositiveButton("Delete", (d, w) -> {
-                    String key = markerKeys.getOrDefault(marker, "");
                     App myApp = (App) getApplicationContext();
                     for (Location loc : myApp.getMyLocations()) {
                         if (App.locationKey(loc.getLatitude(), loc.getLongitude()).equals(key)) {
@@ -322,8 +356,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .show();
     }
 
-    private void showNoteDialog(Marker marker) {
-        String key = markerKeys.getOrDefault(marker, "");
+    private void showNoteDialog(String key) {
         App myApp = (App) getApplicationContext();
         String existingNote = myApp.getLocationNotes().getOrDefault(key, "");
         EditText input = new EditText(this);
@@ -342,6 +375,136 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    // ── Landmark (POI) details ────────────────────────────────────────────────
+
+    private void showPoiDetails(com.google.android.gms.maps.model.PointOfInterest poi) {
+        List<Place.Field> fields = Arrays.asList(
+                Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG,
+                Place.Field.RATING, Place.Field.USER_RATINGS_TOTAL, Place.Field.PRICE_LEVEL,
+                Place.Field.OPENING_HOURS, Place.Field.PHONE_NUMBER, Place.Field.WEBSITE_URI,
+                Place.Field.REVIEWS);
+        placesClient.fetchPlace(FetchPlaceRequest.newInstance(poi.placeId, fields))
+                .addOnSuccessListener(resp -> showPlaceSheet(resp.getPlace(), poi.name, poi.latLng))
+                .addOnFailureListener(e ->
+                        Toast.makeText(this, "Couldn't load place details.", Toast.LENGTH_SHORT).show());
+    }
+
+    private void showPlaceSheet(Place place, String fallbackName, LatLng fallbackLatLng) {
+        LatLng ll = place.getLatLng() != null ? place.getLatLng() : fallbackLatLng;
+        if (ll == null) return;
+        String name = place.getName() != null ? place.getName() : fallbackName;
+        String key = App.locationKey(ll.latitude, ll.longitude);
+
+        View sheet = getLayoutInflater().inflate(R.layout.sheet_place_details, null);
+        ((TextView) sheet.findViewById(R.id.tv_place_name)).setText(name);
+
+        // Rating · price
+        TextView tvRating = sheet.findViewById(R.id.tv_place_rating);
+        StringBuilder rp = new StringBuilder();
+        if (place.getRating() != null) {
+            rp.append("⭐ ").append(place.getRating());
+            if (place.getUserRatingsTotal() != null)
+                rp.append(" (").append(place.getUserRatingsTotal()).append(")");
+        }
+        if (place.getPriceLevel() != null) {
+            if (rp.length() > 0) rp.append("  ·  ");
+            for (int i = 0; i < place.getPriceLevel(); i++) rp.append("$");
+        }
+        if (rp.length() > 0) { tvRating.setVisibility(View.VISIBLE); tvRating.setText(rp.toString()); }
+
+        // Address
+        if (place.getAddress() != null && !place.getAddress().isEmpty()) {
+            TextView tvAddr = sheet.findViewById(R.id.tv_place_address);
+            tvAddr.setVisibility(View.VISIBLE);
+            tvAddr.setText("📍 " + place.getAddress());
+        }
+
+        // Hours
+        if (place.getOpeningHours() != null && place.getOpeningHours().getWeekdayText() != null
+                && !place.getOpeningHours().getWeekdayText().isEmpty()) {
+            sheet.findViewById(R.id.section_hours).setVisibility(View.VISIBLE);
+            ((TextView) sheet.findViewById(R.id.tv_place_hours))
+                    .setText(android.text.TextUtils.join("\n", place.getOpeningHours().getWeekdayText()));
+        }
+
+        // Phone (tap to dial)
+        if (place.getPhoneNumber() != null && !place.getPhoneNumber().isEmpty()) {
+            View row = sheet.findViewById(R.id.btn_place_phone);
+            row.setVisibility(View.VISIBLE);
+            ((TextView) sheet.findViewById(R.id.tv_place_phone)).setText(place.getPhoneNumber());
+            row.setOnClickListener(v -> startActivity(
+                    new Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + place.getPhoneNumber()))));
+        }
+
+        // Website (tap to open)
+        if (place.getWebsiteUri() != null) {
+            View row = sheet.findViewById(R.id.btn_place_website);
+            row.setVisibility(View.VISIBLE);
+            ((TextView) sheet.findViewById(R.id.tv_place_website)).setText(place.getWebsiteUri().toString());
+            row.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW, place.getWebsiteUri())));
+        }
+
+        // Reviews (up to 5)
+        List<com.google.android.libraries.places.api.model.Review> reviews = place.getReviews();
+        if (reviews != null && !reviews.isEmpty()) {
+            sheet.findViewById(R.id.section_reviews).setVisibility(View.VISIBLE);
+            LinearLayout reviewsContainer = sheet.findViewById(R.id.ll_place_reviews);
+            int margin = (int) (10 * getResources().getDisplayMetrics().density);
+            int shown = 0;
+            for (com.google.android.libraries.places.api.model.Review r : reviews) {
+                if (shown++ >= 5) break;
+                String author = r.getAuthorAttribution() != null ? r.getAuthorAttribution().getName() : "Anonymous";
+                TextView tv = new TextView(this);
+                tv.setTextColor(0xFF475569);
+                tv.setTextSize(13);
+                tv.setText("⭐ " + r.getRating() + "  " + author + " · "
+                        + r.getRelativePublishTimeDescription() + "\n" + r.getText());
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.bottomMargin = margin;
+                tv.setLayoutParams(lp);
+                reviewsContainer.addView(tv);
+            }
+        }
+
+        com.google.android.material.bottomsheet.BottomSheetDialog dialog =
+                new com.google.android.material.bottomsheet.BottomSheetDialog(this);
+        dialog.setContentView(sheet);
+
+        // Actions — note/collection auto-save the landmark as a waypoint first.
+        sheet.findViewById(R.id.btn_place_note).setOnClickListener(v -> {
+            dialog.dismiss(); ensureSaved(ll, name); showNoteDialog(key);
+        });
+        sheet.findViewById(R.id.btn_place_collection).setOnClickListener(v -> {
+            dialog.dismiss(); ensureSaved(ll, name); showAddToCollectionDialog(key);
+        });
+        sheet.findViewById(R.id.btn_place_delete).setOnClickListener(v -> {
+            dialog.dismiss();
+            if (isSaved(key)) confirmDelete(key);
+            else Toast.makeText(this, "This place isn't saved yet.", Toast.LENGTH_SHORT).show();
+        });
+        dialog.show();
+    }
+
+    private boolean isSaved(String key) {
+        for (Location loc : ((App) getApplicationContext()).getMyLocations())
+            if (App.locationKey(loc.getLatitude(), loc.getLongitude()).equals(key)) return true;
+        return false;
+    }
+
+    /** Persist a tapped landmark as a waypoint (with its name) if not already saved. */
+    private void ensureSaved(LatLng ll, String name) {
+        if (isSaved(App.locationKey(ll.latitude, ll.longitude))) return;
+        App myApp = (App) getApplicationContext();
+        Location loc = new Location("poi");
+        loc.setLatitude(ll.latitude); loc.setLongitude(ll.longitude);
+        myApp.saveLocation(loc);
+        if (name != null && !name.isEmpty())
+            myApp.saveLocationName(App.locationKey(ll.latitude, ll.longitude), name);
+        refreshMapMarkers();
+        Toast.makeText(this, "Saved to waypoints", Toast.LENGTH_SHORT).show();
     }
 
     private void enableMyLocationLayer() {
@@ -445,16 +608,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             String note = myApp.getLocationNotes().getOrDefault(key, "");
             if (!note.isEmpty()) addLabelMarker(marker, note);
         }
-    }
-
-    private View buildInfoWindow(Marker marker) {
-        View view = getLayoutInflater().inflate(R.layout.custom_infowindow, null);
-        ((TextView) view.findViewById(R.id.tv_info_title)).setText(marker.getTitle());
-        String note = ((App)getApplicationContext()).getLocationNotes().getOrDefault(markerKeys.getOrDefault(marker, ""), "");
-        TextView tv_snippet = view.findViewById(R.id.tv_info_snippet);
-        if (!note.isEmpty()) { tv_snippet.setVisibility(View.VISIBLE); tv_snippet.setText("📝 " + note); }
-        else { tv_snippet.setVisibility(View.GONE); }
-        return view;
     }
 
     private void addLabelMarker(Marker pinMarker, String note) {
