@@ -24,6 +24,9 @@ public class App extends Application {
     private static final String KEY_COLLECTION_KEYS  = "collection_keys_";
     private Map<String, String> locationNames = new HashMap<>();
     private static final String KEY_NAME_PREFIX = "name_";
+    // Google placeId for saved landmarks (POIs). Presence of a key here == "this is a landmark".
+    private Map<String, String> locationPlaceIds = new HashMap<>();
+    private static final String KEY_PLACEID_PREFIX = "placeid_";
 
     private List<Location> myLocations          = new ArrayList<>();
     private Map<String, String> locationNotes   = new HashMap<>();
@@ -79,6 +82,7 @@ public class App extends Application {
         // Remove note — key must match exactly
         removeNote(key);
         removeLocationName(key);
+        removeLocationPlaceId(key);
     }
 
     // ── Notes ────────────────────────────────────────────────────────────────
@@ -143,14 +147,19 @@ public class App extends Application {
             myLocations.add(loc);
         }
 
-        // Load notes AND names in one loop
+        // Load notes, names AND placeIds in one loop
         locationNotes.clear();
         locationNames.clear();
+        locationPlaceIds.clear();
         for (Map.Entry<String, ?> entry : allPrefs.entrySet()) {
             if (entry.getKey().startsWith(KEY_NOTE_PREFIX)) {
                 String coordKey = entry.getKey().substring(KEY_NOTE_PREFIX.length());
                 if (entry.getValue() instanceof String)
                     locationNotes.put(coordKey, (String) entry.getValue());
+            } else if (entry.getKey().startsWith(KEY_PLACEID_PREFIX)) {
+                String coordKey = entry.getKey().substring(KEY_PLACEID_PREFIX.length());
+                if (entry.getValue() instanceof String)
+                    locationPlaceIds.put(coordKey, (String) entry.getValue());
             } else if (entry.getKey().startsWith(KEY_NAME_PREFIX)) {
                 String coordKey = entry.getKey().substring(KEY_NAME_PREFIX.length());
                 if (entry.getValue() instanceof String)
@@ -227,6 +236,28 @@ public class App extends Application {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit()
                 .remove(KEY_NAME_PREFIX + key)
+                .apply();
+    }
+
+    // ── Landmark placeId (marks a saved location as a Google POI) ──────────────
+    public void saveLocationPlaceId(String key, String placeId) {
+        locationPlaceIds.put(key, placeId);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(KEY_PLACEID_PREFIX + key, placeId)
+                .apply();
+    }
+    public String getLocationPlaceId(String key) {
+        return locationPlaceIds.getOrDefault(key, "");
+    }
+    public boolean isLandmark(String key) {
+        return locationPlaceIds.containsKey(key);
+    }
+    public void removeLocationPlaceId(String key) {
+        locationPlaceIds.remove(key);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .remove(KEY_PLACEID_PREFIX + key)
                 .apply();
     }
 }
