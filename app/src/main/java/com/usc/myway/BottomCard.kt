@@ -24,14 +24,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
+private val TealDeep = Color(0xFF00A77D)
 
 /** Live GPS/location values the activity writes to; the card reads them reactively. */
 class StatsState {
@@ -51,15 +50,8 @@ interface StatsActions {
     fun onShare()
 }
 
-object BottomCardHost {
-    @JvmStatic
-    fun install(view: ComposeView, state: StatsState, actions: StatsActions, dark: Boolean) {
-        view.setContent { MyWayTheme(darkTheme = dark) { BottomCard(state, actions) } }
-    }
-}
-
 @Composable
-private fun BottomCard(state: StatsState, actions: StatsActions) {
+internal fun BottomCard(state: StatsState, actions: StatsActions) {
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -71,17 +63,16 @@ private fun BottomCard(state: StatsState, actions: StatsActions) {
             Row(verticalAlignment = Alignment.Top) {
                 Text("📍", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("CURRENT ADDRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Text("CURRENT ADDRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDeep)
                     Text(state.address, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2,
                         overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
             if (state.savedAddress.isNotEmpty()) {
                 Text("📍 ${state.savedAddress}", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = Color(0xFF059669),
+                    color = TealDeep,
                     modifier = Modifier.padding(start = 24.dp, top = 4.dp).clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF059669).copy(alpha = 0.1f)).padding(horizontal = 8.dp, vertical = 4.dp))
+                        .background(Teal.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 4.dp))
             }
 
             // Actions
@@ -92,13 +83,14 @@ private fun BottomCard(state: StatsState, actions: StatsActions) {
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
                 ) { Text("💾 Save", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                val tonal = ButtonDefaults.filledTonalButtonColors(containerColor = Teal.copy(alpha = 0.12f), contentColor = TealDeep)
                 FilledTonalButton(
-                    onClick = actions::onPin, shape = RoundedCornerShape(12.dp),
+                    onClick = actions::onPin, shape = RoundedCornerShape(12.dp), colors = tonal,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
                 ) { Text(if (state.pinMode) "📌 Cancel" else "📌 Pin", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                 FilledTonalButton(
-                    onClick = actions::onShare, shape = RoundedCornerShape(12.dp),
+                    onClick = actions::onShare, shape = RoundedCornerShape(12.dp), colors = tonal,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
                 ) { Text("📤 Share", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
@@ -120,9 +112,9 @@ private fun BottomCard(state: StatsState, actions: StatsActions) {
 private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier.clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)).padding(vertical = 8.dp, horizontal = 6.dp)
+            .background(Teal.copy(alpha = 0.10f)).padding(vertical = 8.dp, horizontal = 6.dp)
     ) {
-        Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+        Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TealDeep)
         Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface)
     }

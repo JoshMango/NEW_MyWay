@@ -13,14 +13,5 @@
         <item name="android:statusBarColor">#0097A7</item>
         <item name="android:navigationBarColor">#0097A7</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="tabStyle">@style/TealTabStyle</item>
-    </style>
-
-    <style name="TealTabStyle" parent="Widget.MaterialComponents.TabLayout">
-        <item name="android:background">#0097A7</item>
-        <item name="tabTextColor">#80FFFFFF</item>
-        <item name="tabSelectedTextColor">@android:color/white</item>
-        <item name="tabIndicatorColor">@android:color/white</item>
-        <item name="tabIndicatorHeight">3dp</item>
     </style>
 </resources>

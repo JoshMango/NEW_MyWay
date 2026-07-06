@@ -1,0 +1,268 @@
+// Compose bottom sheets for map markers: the normal-pin actions sheet and the rich landmark
+// (POI) details sheet. Async work (geocode, isOpen, photos) runs off the main thread.
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package com.usc.myway
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.location.Geocoder
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.tasks.Tasks
+import com.google.android.libraries.places.api.model.PhotoMetadata
+import com.google.android.libraries.places.api.model.Place
+import com.google.android.libraries.places.api.net.FetchPhotoRequest
+import com.google.android.libraries.places.api.net.IsOpenRequest
+import com.google.android.libraries.places.api.net.PlacesClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+private val Teal = Color(0xFF00C99D)
+private val TealDeep = Color(0xFF00A77D)
+
+/* ── Normal-pin actions sheet ──────────────────────────────────────────── */
+
+@Composable
+fun MarkerActionsSheet(
+    title: String,
+    note: String,
+    latLng: LatLng,
+    onDismiss: () -> Unit,
+    onNote: () -> Unit,
+    onCollection: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val address by produceState("", latLng) { value = geocodeLine(ctx, latLng) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            if (note.isNotEmpty()) Text("📝 $note", fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(top = 4.dp))
+            if (address.isNotEmpty()) Text("📍 $address", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
+            Spacer(Modifier.height(16.dp))
+            SheetButton("✏️  Add / Edit Note", Teal, Color.White, onNote)
+            Spacer(Modifier.height(10.dp))
+            SheetButton("📁  Add to Collection", MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), TealDeep, onCollection)
+            Spacer(Modifier.height(10.dp))
+            SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Color(0xFFEF4444), onDelete)
+        }
+    }
+}
+
+/* ── Landmark details sheet ────────────────────────────────────────────── */
+
+@Composable
+fun PlaceDetailsSheet(
+    place: Place,
+    name: String,
+    userNote: String,
+    isSaved: Boolean,
+    placesClient: PlacesClient,
+    photoCache: MutableMap<String, Bitmap>,
+    isOpenCache: MutableMap<String, Boolean>,
+    onDismiss: () -> Unit,
+    onNote: () -> Unit,
+    onCollection: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val placeId = place.id ?: System.identityHashCode(place).toString()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+            // Photos
+            val photos = place.photoMetadatas
+            if (!photos.isNullOrEmpty()) {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(bottom = 14.dp),
+                ) {
+                    items(photos.take(6)) { meta ->
+                        PhotoCard(meta, placesClient, "$placeId#${photos.indexOf(meta)}", photoCache)
+                    }
+                }
+            }
+
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                Text(name, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis, color = onSurface)
+
+                // Rating · price
+                val ratingText = buildString {
+                    place.rating?.let { r ->
+                        append(String.format("%.1f ", r)).append(starString(r))
+                        place.userRatingsTotal?.let { append(" ($it)") }
+                    }
+                    place.priceLevel?.let { pl ->
+                        if (isNotEmpty()) append("  ·  ")
+                        repeat(pl) { append("$") }
+                    }
+                }
+                if (ratingText.isNotEmpty()) Text(ratingText, fontSize = 14.sp,
+                    color = onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(top = 4.dp))
+
+                // Open / closed status (async)
+                val status by produceState<Pair<String, Boolean>?>(null, place) {
+                    value = computeOpenStatus(place, placesClient, isOpenCache)
+                }
+                status?.let { (text, open) ->
+                    Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        color = if (open) Color(0xFF16A34A) else Color(0xFFEF4444),
+                        modifier = Modifier.padding(top = 6.dp))
+                }
+
+                // User note
+                if (userNote.isNotEmpty()) Text("📝 $userNote", fontSize = 13.sp, color = onSurface,
+                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(onSurface.copy(alpha = 0.05f)).padding(12.dp))
+
+                // Actions
+                Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) { SheetButton("✏️  Note", onSurface.copy(alpha = 0.06f), TealDeep, onNote) }
+                    Box(Modifier.weight(1f)) { SheetButton("📁  Collection", onSurface.copy(alpha = 0.06f), TealDeep, onCollection) }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 14.dp), color = onSurface.copy(alpha = 0.1f))
+
+                place.address?.takeIf { it.isNotEmpty() }?.let { InfoRow("📍", it) }
+                place.openingHours?.weekdayText?.takeIf { it.isNotEmpty() }?.let { InfoRow("🕐", it.joinToString("\n")) }
+                place.phoneNumber?.takeIf { it.isNotEmpty() }?.let {
+                    val i = android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:$it"))
+                    InfoRow("📞", it, Teal) { ctx.startActivity(i) }
+                }
+                place.websiteUri?.let {
+                    val i = android.content.Intent(android.content.Intent.ACTION_VIEW, it)
+                    InfoRow("🌐", it.toString(), Teal) { ctx.startActivity(i) }
+                }
+
+                // Reviews (up to 5)
+                place.reviews?.takeIf { it.isNotEmpty() }?.let { reviews ->
+                    Text("REVIEWS", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                    reviews.take(5).forEach { r ->
+                        val author = r.authorAttribution?.name ?: "Anonymous"
+                        Text("⭐ ${r.rating}  $author · ${r.relativePublishTimeDescription}\n${r.text}",
+                            fontSize = 13.sp, color = onSurface.copy(alpha = 0.75f),
+                            modifier = Modifier.padding(bottom = 10.dp))
+                    }
+                }
+
+                if (isSaved) {
+                    Spacer(Modifier.height(6.dp))
+                    SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Color(0xFFEF4444), onDelete)
+                }
+            }
+        }
+    }
+}
+
+/* ── Pieces ────────────────────────────────────────────────────────────── */
+
+@Composable
+private fun SheetButton(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp))
+            .background(bg).clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) { Text(text, color = fg, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
+}
+
+@Composable
+private fun InfoRow(emoji: String, text: String, textColor: Color? = null, onClick: (() -> Unit)? = null) {
+    val base = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+    Row(if (onClick != null) base.clickable(onClick = onClick) else base, verticalAlignment = Alignment.CenterVertically) {
+        Text(emoji, fontSize = 16.sp, modifier = Modifier.padding(end = 14.dp))
+        Text(text, fontSize = 13.sp, fontWeight = if (textColor != null) FontWeight.Bold else FontWeight.Normal,
+            color = textColor ?: MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun PhotoCard(meta: PhotoMetadata, placesClient: PlacesClient, cacheKey: String, cache: MutableMap<String, Bitmap>) {
+    val bmp by produceState(cache[cacheKey], cacheKey) {
+        if (value != null) return@produceState
+        value = try {
+            val req = FetchPhotoRequest.builder(meta).setMaxWidth(600).setMaxHeight(400).build()
+            val r = withContext(Dispatchers.IO) { Tasks.await(placesClient.fetchPhoto(req)) }
+            r.bitmap.also { cache[cacheKey] = it }
+        } catch (_: Exception) { null }
+    }
+    Column(
+        Modifier.size(width = 240.dp, height = 160.dp).clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFE2E8F0))
+    ) {
+        bmp?.let {
+            Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().height(160.dp), contentScale = ContentScale.Crop)
+        }
+    }
+}
+
+private fun starString(rating: Double): String {
+    val full = Math.round(rating).toInt()
+    return buildString { for (i in 0 until 5) append(if (i < full) "★" else "☆") }
+}
+
+private suspend fun geocodeLine(ctx: Context, ll: LatLng): String = withContext(Dispatchers.IO) {
+    try {
+        @Suppress("DEPRECATION")
+        Geocoder(ctx).getFromLocation(ll.latitude, ll.longitude, 1)?.firstOrNull()?.getAddressLine(0) ?: ""
+    } catch (_: Exception) { "" }
+}
+
+private suspend fun computeOpenStatus(
+    place: Place, placesClient: PlacesClient, cache: MutableMap<String, Boolean>,
+): Pair<String, Boolean>? {
+    when (place.businessStatus) {
+        Place.BusinessStatus.CLOSED_PERMANENTLY -> return "Permanently closed" to false
+        Place.BusinessStatus.CLOSED_TEMPORARILY -> return "Temporarily closed" to false
+        else -> {}
+    }
+    val id = place.id
+    if (id != null && cache.containsKey(id)) { val o = cache[id]!!; return (if (o) "Open now" else "Closed") to o }
+    return try {
+        val resp = withContext(Dispatchers.IO) { Tasks.await(placesClient.isOpen(IsOpenRequest.newInstance(place))) }
+        resp.isOpen?.let { open ->
+            if (id != null) cache[id] = open
+            (if (open) "Open now" else "Closed") to open
+        }
+    } catch (_: Exception) { null }
+}
