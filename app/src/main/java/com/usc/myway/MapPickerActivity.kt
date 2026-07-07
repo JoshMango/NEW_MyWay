@@ -81,7 +81,7 @@ class MapPickerActivity : ComponentActivity() {
         val app = applicationContext as App
         val mode = intent.getStringExtra("mode") ?: "address"
         val initial = LatLng(intent.getDoubleExtra("latitude", 0.0), intent.getDoubleExtra("longitude", 0.0))
-        if (!Places.isInitialized()) Places.initialize(applicationContext, BuildConfig.MAPS_API_KEY)
+        if (!Places.isInitialized()) Places.initializeWithNewPlacesApiEnabled(applicationContext, BuildConfig.MAPS_API_KEY)
         val placesClient = Places.createClient(this)
 
         setContent {
