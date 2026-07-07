@@ -41,6 +41,7 @@ class StatsState {
     var address by mutableStateOf("Waiting for location…")
     var savedAddress by mutableStateOf("") // set-address result; blank = hidden chip
     var pinMode by mutableStateOf(false)   // Pin vs Cancel label
+    var tracking by mutableStateOf(true)   // false hides the live GPS stat tiles
 }
 
 interface StatsActions {
@@ -95,13 +96,15 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
                 ) { Text("📤 Share", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
             }
 
-            // Stats
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatTile("LAT", state.lat, Modifier.weight(1f))
-                StatTile("LNG", state.lon, Modifier.weight(1f))
-                StatTile("ALT", state.altitude, Modifier.weight(1f))
-                StatTile("ACC", state.accuracy, Modifier.weight(1f))
-                StatTile("SPD", state.speed, Modifier.weight(1f))
+            // Stats — live GPS values, hidden when tracking is off.
+            if (state.tracking) {
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatTile("LAT", state.lat, Modifier.weight(1f))
+                    StatTile("LNG", state.lon, Modifier.weight(1f))
+                    StatTile("ALT", state.altitude, Modifier.weight(1f))
+                    StatTile("ACC", state.accuracy, Modifier.weight(1f))
+                    StatTile("SPD", state.speed, Modifier.weight(1f))
+                }
             }
         }
     }

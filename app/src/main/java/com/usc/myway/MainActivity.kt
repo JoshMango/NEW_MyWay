@@ -6,6 +6,10 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Geocoder
 import android.location.Location
 import android.net.Uri
@@ -161,6 +165,27 @@ class MainActivity : ComponentActivity() {
     private var rerouting = false
     private var offRouteCount = 0
     private var lastRerouteTime = 0L
+    private var lastNavBearing = 0f
+
+    // Heading-up (compass) mode — rotates the map to the device's facing.
+    private var headingMode by mutableStateOf(false)
+    private var sensorManager: SensorManager? = null
+    private var rotationSensor: Sensor? = null
+    private var smoothedAz = Float.NaN
+    private var lastAppliedBearing = Float.NaN
+    private val orientationListener = object : SensorEventListener {
+        private val rot = FloatArray(9)
+        private val orient = FloatArray(3)
+        override fun onSensorChanged(e: SensorEvent) {
+            if (e.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
+            SensorManager.getRotationMatrixFromVector(rot, e.values)
+            SensorManager.getOrientation(rot, orient)
+            var az = Math.toDegrees(orient[0].toDouble()).toFloat()
+            if (az < 0f) az += 360f
+            handleAzimuth(az)
+        }
+        override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+    }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasLocationPerm = granted
@@ -194,6 +219,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         refresh()
         handleFocusIntent(intent)
+        if (headingMode) sensorManager?.registerListener(orientationListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (headingMode) sensorManager?.unregisterListener(orientationListener)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -206,6 +237,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         geocodeExecutor.shutdownNow()
         tts?.shutdown()
+        sensorManager?.unregisterListener(orientationListener)
     }
 
     /* ── Compose UI ─────────────────────────────────────────────────────── */
@@ -293,7 +325,14 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.align(Alignment.BottomCenter)) {
                     if (navigating) {
                         routes.getOrNull(selectedRouteIndex)?.let { r ->
-                            NavFooter(r, currentStepIndex) { exitNavigation() }
+                            Column(Modifier.fillMaxWidth()) {
+                                // Recenter button — snap back to following your position/heading.
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 0.dp).padding(bottom = 10.dp),
+                                    horizontalArrangement = Arrangement.End) {
+                                    CircleButton({ recenterNav() }) { Text("🧭", fontSize = 18.sp) }
+                                }
+                                NavFooter(r, currentStepIndex) { exitNavigation() }
+                            }
                         }
                     } else {
                         DirectionsPanel(
@@ -314,7 +353,10 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
                         MapControls(
                             bearing = bearing,
+                            headingMode = headingMode,
+                            showHeading = stats.tracking,
                             onCompass = { scope.launch { cam.animate(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cam.position).bearing(0f).tilt(0f).build())) } },
+                            onToggleHeading = { applyHeadingMode(!headingMode) },
                             onMyLocation = { if (savedLat != 0.0 || savedLng != 0.0) animateTo(LatLng(savedLat, savedLng), 17f) },
                         )
                     }
@@ -340,20 +382,32 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun MapControls(bearing: Float, onCompass: () -> Unit, onMyLocation: () -> Unit) {
+    private fun MapControls(
+        bearing: Float,
+        headingMode: Boolean,
+        showHeading: Boolean,
+        onCompass: () -> Unit,
+        onToggleHeading: () -> Unit,
+        onMyLocation: () -> Unit,
+    ) {
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (bearing != 0f) {
-                CircleButton(onCompass) { Text("🧭", fontSize = 20.sp, modifier = Modifier.rotate(-bearing)) }
+            // Reset-north arrow (points to north) — only when rotated and not in heading mode.
+            if (bearing != 0f && !headingMode) {
+                CircleButton(onCompass) { Text("⬆️", fontSize = 18.sp, modifier = Modifier.rotate(-bearing)) }
+            }
+            // Heading-up toggle (highlighted when active).
+            if (showHeading) {
+                CircleButton(onToggleHeading, active = headingMode) { Text("🧭", fontSize = 18.sp) }
             }
             CircleButton(onMyLocation) { Text("📍", fontSize = 18.sp) }
         }
     }
 
     @Composable
-    private fun CircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    private fun CircleButton(onClick: () -> Unit, active: Boolean = false, content: @Composable () -> Unit) {
         Box(
             Modifier.size(44.dp).shadow(4.dp, CircleShape).clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface).clickable(onClick = onClick),
+                .background(if (active) Teal else MaterialTheme.colorScheme.surface).clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) { content() }
     }
@@ -475,7 +529,7 @@ class MainActivity : ComponentActivity() {
         override fun onSetAddress() { drawerOpen = false; startAddressPicker() }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
-        override fun onTrackingChanged(enabled: Boolean) { if (enabled) startLocationUpdates() else stopLocationUpdates() }
+        override fun onTrackingChanged(enabled: Boolean) { stats.tracking = enabled; if (enabled) startLocationUpdates() else { applyHeadingMode(false); stopLocationUpdates() } }
         override fun onGpsModeChanged(highAccuracy: Boolean) {
             locReq = buildLocReq(if (highAccuracy) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY)
         }
@@ -631,6 +685,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startNavigation() {
         val route = routes.getOrNull(selectedRouteIndex) ?: return
+        applyHeadingMode(false) // nav orients to movement instead
         navigating = true; currentStepIndex = 0
         navDistanceToNext = route.steps.firstOrNull()?.distanceMeters ?: 0
         rerouting = false; offRouteCount = 0; lastRerouteTime = System.currentTimeMillis()
@@ -662,7 +717,8 @@ class MainActivity : ComponentActivity() {
             if (travelMode == TravelMode.DRIVE && !rerouting && now - lastRerouteTime > 90000L) reroute(announce = false)
         }
 
-        val bearing = if (loc.hasBearing()) loc.bearing else camState?.position?.bearing ?: 0f
+        val bearing = if (loc.hasBearing()) loc.bearing else lastNavBearing
+        lastNavBearing = bearing
         updateNavigationCamera(here, bearing)
 
         val steps = route.steps
@@ -698,9 +754,50 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /* ── Heading-up (compass) mode ──────────────────────────────────────── */
+
+    private fun applyHeadingMode(on: Boolean) {
+        if (on == headingMode) return
+        if (on) {
+            if (sensorManager == null) sensorManager = getSystemService(SensorManager::class.java)
+            if (rotationSensor == null) rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            if (rotationSensor == null) { toast("Compass not available on this device."); return }
+            headingMode = true
+            smoothedAz = Float.NaN; lastAppliedBearing = Float.NaN
+            sensorManager?.registerListener(orientationListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+        } else {
+            headingMode = false
+            sensorManager?.unregisterListener(orientationListener)
+        }
+    }
+
+    /** Low-pass + threshold the compass azimuth, then rotate the map so facing = screen-up. */
+    private fun handleAzimuth(raw: Float) {
+        smoothedAz = if (smoothedAz.isNaN()) raw else {
+            var d = raw - smoothedAz
+            if (d > 180f) d -= 360f else if (d < -180f) d += 360f
+            var v = smoothedAz + d * 0.2f
+            if (v < 0f) v += 360f else if (v >= 360f) v -= 360f
+            v
+        }
+        if (!lastAppliedBearing.isNaN()) {
+            var dd = smoothedAz - lastAppliedBearing
+            if (dd > 180f) dd -= 360f else if (dd < -180f) dd += 360f
+            if (kotlin.math.abs(dd) < 1.5f) return
+        }
+        lastAppliedBearing = smoothedAz
+        val c = camState ?: return
+        c.move(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(c.position).bearing(smoothedAz).build()))
+    }
+
     private fun updateNavigationCamera(target: LatLng, bearing: Float) {
         val pos = CameraPosition.Builder().target(target).zoom(17.5f).tilt(50f).bearing(bearing).build()
         uiScope?.launch { camState?.animate(CameraUpdateFactory.newCameraPosition(pos), 800) }
+    }
+
+    /** Snap the camera back to following the user (after they panned the map during nav). */
+    private fun recenterNav() {
+        if (savedLat != 0.0 || savedLng != 0.0) updateNavigationCamera(LatLng(savedLat, savedLng), lastNavBearing)
     }
 
     private fun enterNavLocationUpdates() {
