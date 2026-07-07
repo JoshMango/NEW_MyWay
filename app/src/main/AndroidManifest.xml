@@ -33,6 +33,9 @@
             android:name=".OnboardingActivity"
             android:exported="false" />
         <activity
+            android:name=".FriendsActivity"
+            android:exported="false" />
+        <activity
             android:name=".RegisterActivity"
             android:exported="false" />
         <activity

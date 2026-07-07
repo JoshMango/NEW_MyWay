@@ -527,6 +527,7 @@ class MainActivity : ComponentActivity() {
         override fun onNewWaypoint() { drawerOpen = false; startWaypointPicker() }
         override fun onShowWaypoints() { drawerOpen = false; startActivity(Intent(this@MainActivity, ShowSavedLocations::class.java)) }
         override fun onSetAddress() { drawerOpen = false; startAddressPicker() }
+        override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
         override fun onTrackingChanged(enabled: Boolean) { stats.tracking = enabled; if (enabled) startLocationUpdates() else { applyHeadingMode(false); stopLocationUpdates() } }
