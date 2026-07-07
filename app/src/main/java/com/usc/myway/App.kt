@@ -28,6 +28,10 @@ class App : Application() {
     fun isDarkMode(): Boolean = prefs().getBoolean(KEY_DARK_MODE, false)
     fun setDarkMode(enabled: Boolean) { prefs().edit().putBoolean(KEY_DARK_MODE, enabled).apply() }
 
+    // ── User @tag cache (keyed by uid) — lets sign-in skip onboarding + a Firestore read. ──
+    fun getUserTag(uid: String): String = prefs().getString(KEY_USER_TAG + uid, "") ?: ""
+    fun setUserTag(uid: String, tag: String) { prefs().edit().putString(KEY_USER_TAG + uid, tag).apply() }
+
     // ── Locations ──────────────────────────────────────────────────────────────
     fun saveLocation(loc: Location) { myLocations.add(loc); saveLocationsToPrefs() }
 
@@ -173,6 +177,7 @@ class App : Application() {
         private const val KEY_COLLECTION_ICON = "collection_icon_"
         private const val KEY_COLLECTION_KEYS = "collection_keys_"
         private const val KEY_DARK_MODE = "dark_mode"
+        private const val KEY_USER_TAG = "usertag_"
 
         // Key helper — must be consistent everywhere.
         @JvmStatic
