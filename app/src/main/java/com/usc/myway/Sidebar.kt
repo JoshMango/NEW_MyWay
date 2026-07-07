@@ -54,6 +54,7 @@ interface SidebarActions {
     fun onNewWaypoint()
     fun onShowWaypoints()
     fun onSetAddress()
+    fun onFriends()
     fun onToggleTheme()
     fun onLogout()
     fun onTrackingChanged(enabled: Boolean)
@@ -87,6 +88,10 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
                 SbItem("➕", "Add Waypoint", actions::onNewWaypoint)
                 SbItem("📋", "Saved Waypoints", actions::onShowWaypoints)
                 SbItem("🎯", "Set Address", actions::onSetAddress)
+
+                Spacer(Modifier.height(12.dp))
+                SectionLabel("SOCIAL")
+                SbItem("👥", "Friends", actions::onFriends)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")
