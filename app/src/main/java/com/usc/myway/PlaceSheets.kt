@@ -94,23 +94,28 @@ fun MarkerActionsSheet(
     note: String,
     latLng: LatLng,
     onDismiss: () -> Unit,
+    onDirections: () -> Unit,
     onNote: () -> Unit,
     onCollection: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val address by produceState("", latLng) { value = geocodeLine(ctx, latLng) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onSurface)
             if (note.isNotEmpty()) Text("📝 $note", fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(top = 4.dp))
+                color = onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(top = 4.dp))
             if (address.isNotEmpty()) Text("📍 $address", fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
+                color = onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(16.dp))
-            SheetButton("✏️  Add / Edit Note", Teal, Color.White, onNote)
+            SheetButton("🧭  Directions", Teal, Color.White, onDirections)
             Spacer(Modifier.height(10.dp))
-            SheetButton("📁  Add to Collection", MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), TealDeep, onCollection)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f)) { SheetButton("✏️  Note", onSurface.copy(alpha = 0.06f), TealDeep, onNote) }
+                Box(Modifier.weight(1f)) { SheetButton("📁  Collection", onSurface.copy(alpha = 0.06f), TealDeep, onCollection) }
+            }
             Spacer(Modifier.height(10.dp))
             SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Red, onDelete)
         }
@@ -129,6 +134,7 @@ fun PlaceDetailsSheet(
     photoCache: MutableMap<String, Bitmap>,
     isOpenCache: MutableMap<String, Boolean>,
     onDismiss: () -> Unit,
+    onDirections: () -> Unit,
     onNote: () -> Unit,
     onCollection: () -> Unit,
     onDelete: () -> Unit,
@@ -208,8 +214,10 @@ fun PlaceDetailsSheet(
                 }
 
                 // Actions
-                Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(Modifier.weight(1f)) { SheetButton("✏️  Note", Teal, Color.White, onNote) }
+                Spacer(Modifier.height(16.dp))
+                SheetButton("🧭  Directions", Teal, Color.White, onDirections)
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.weight(1f)) { SheetButton("✏️  Note", onSurface.copy(alpha = 0.06f), TealDeep, onNote) }
                     Box(Modifier.weight(1f)) { SheetButton("📁  Collection", onSurface.copy(alpha = 0.06f), TealDeep, onCollection) }
                 }
             }
