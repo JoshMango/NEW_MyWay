@@ -241,8 +241,24 @@ class LoginActivity : ComponentActivity() {
         else -> id
     }
 
+    // Routes to onboarding on first login (no @tag yet), otherwise straight to the map.
+    // Local per-uid cache avoids a Firestore read on every launch; a cache miss falls back
+    // to Firestore. On network error fetchTag returns null → onboarding, whose claim is
+    // idempotent, so an existing user re-claiming their own tag still succeeds.
     private fun goToMain() {
-        startActivity(Intent(this, MainActivity::class.java))
+        val user = auth.currentUser ?: run { launch(MainActivity::class.java); return }
+        val app = application as App
+        if (app.getUserTag(user.uid).isNotEmpty()) { launch(MainActivity::class.java); return }
+        loading.value = true
+        Profiles.fetchTag(user.uid) { tag ->
+            loading.value = false
+            if (tag != null) { app.setUserTag(user.uid, tag); launch(MainActivity::class.java) }
+            else launch(OnboardingActivity::class.java)
+        }
+    }
+
+    private fun launch(cls: Class<*>) {
+        startActivity(Intent(this, cls))
         finish()
     }
 }
