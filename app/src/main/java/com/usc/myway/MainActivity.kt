@@ -10,6 +10,8 @@ import android.location.Geocoder
 import android.location.Location
 import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -75,6 +77,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
@@ -89,6 +92,7 @@ import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapEffect
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.usc.myway.ui.theme.MyWayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -140,6 +144,24 @@ class MainActivity : ComponentActivity() {
     private var deleteKey by mutableStateOf<String?>(null)
     private var savePinLatLng by mutableStateOf<LatLng?>(null)
 
+    // Directions
+    private var routeDest by mutableStateOf<LatLng?>(null)
+    private var routeDestName by mutableStateOf("")
+    private var routeLoading by mutableStateOf(false)
+    private var routes by mutableStateOf<List<RouteResult>>(emptyList())
+    private var selectedRouteIndex by mutableIntStateOf(0)
+    private var routePoints by mutableStateOf<List<LatLng>>(emptyList())
+    private var travelMode by mutableStateOf(TravelMode.DRIVE)
+    // Live navigation
+    private var navigating by mutableStateOf(false)
+    private var currentStepIndex by mutableIntStateOf(0)
+    private var navDistanceToNext by mutableIntStateOf(0)
+    private var voiceEnabled by mutableStateOf(true)
+    private var tts: TextToSpeech? = null
+    private var rerouting = false
+    private var offRouteCount = 0
+    private var lastRerouteTime = 0L
+
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasLocationPerm = granted
         if (granted) startLocationUpdates()
@@ -157,6 +179,7 @@ class MainActivity : ComponentActivity() {
         fusedLocClient = LocationServices.getFusedLocationProviderClient(this)
         if (!Places.isInitialized()) Places.initializeWithNewPlacesApiEnabled(applicationContext, BuildConfig.MAPS_API_KEY)
         placesClient = Places.createClient(this)
+        tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
         setupLocationRequest()
 
         sidebar.darkMode = isDarkMode(); sidebar.tracking = true; sidebar.gpsHighAccuracy = false
@@ -182,6 +205,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         geocodeExecutor.shutdownNow()
+        tts?.shutdown()
     }
 
     /* ── Compose UI ─────────────────────────────────────────────────────── */
@@ -224,36 +248,78 @@ class MainActivity : ComponentActivity() {
                     markers.refresh(map, app, dark)
                 }
                 MapEffect(refreshKey, dark) { map -> markers.refresh(map, app, dark) }
-            }
 
-            // Top: floating hamburger + search only.
-            Row(
-                Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding()
-                    .padding(start = 10.dp, end = 12.dp, top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(48.dp).shadow(4.dp, RoundedCornerShape(12.dp))
-                        .clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
-                        .clickable { drawerOpen = true },
-                    contentAlignment = Alignment.Center,
-                ) { Text("☰", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.weight(1f)) {
-                    SearchBar(placesClient, PlacePickedListener { ll -> animateTo(ll, 16f) })
+                if (routePoints.isNotEmpty()) {
+                    Polyline(points = routePoints, color = Teal, width = 16f)
                 }
             }
 
-            // Bottom: map controls (compass + my-location) sit at the top-right, above the card.
-            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp)) {
-                Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
-                    MapControls(
-                        bearing = bearing,
-                        onCompass = { scope.launch { cam.animate(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cam.position).bearing(0f).tilt(0f).build())) } },
-                        onMyLocation = { if (savedLat != 0.0 || savedLng != 0.0) animateTo(LatLng(savedLat, savedLng), 17f) },
+            val directionsActive = routeDest != null
+
+            // Top: floating hamburger + search only (hidden while navigating).
+            if (!directionsActive) {
+                Row(
+                    Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding()
+                        .padding(start = 10.dp, end = 12.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(48.dp).shadow(4.dp, RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+                            .clickable { drawerOpen = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("☰", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) }
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f)) {
+                        SearchBar(placesClient, PlacePickedListener { ll -> animateTo(ll, 16f) })
+                    }
+                }
+            }
+
+            // Top: live maneuver banner while navigating.
+            if (navigating) {
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                    NavBanner(
+                        step = routes.getOrNull(selectedRouteIndex)?.steps?.getOrNull(currentStepIndex),
+                        distanceToNext = navDistanceToNext,
+                        voiceOn = voiceEnabled,
+                        onToggleVoice = { voiceEnabled = !voiceEnabled },
                     )
                 }
-                BottomCard(stats, statsActions)
+            }
+
+            // Bottom: nav footer while navigating, planning panel while routing, else stats + controls.
+            if (directionsActive) {
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    if (navigating) {
+                        routes.getOrNull(selectedRouteIndex)?.let { r ->
+                            NavFooter(r, currentStepIndex) { exitNavigation() }
+                        }
+                    } else {
+                        DirectionsPanel(
+                            destName = routeDestName,
+                            mode = travelMode,
+                            loading = routeLoading,
+                            routes = routes,
+                            selectedIndex = selectedRouteIndex,
+                            onMode = { changeTravelMode(it) },
+                            onSelectRoute = { selectRoute(it) },
+                            onStart = { startNavigation() },
+                            onClose = { closeDirections() },
+                        )
+                    }
+                }
+            } else {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
+                        MapControls(
+                            bearing = bearing,
+                            onCompass = { scope.launch { cam.animate(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cam.position).bearing(0f).tilt(0f).build())) } },
+                            onMyLocation = { if (savedLat != 0.0 || savedLng != 0.0) animateTo(LatLng(savedLat, savedLng), 17f) },
+                        )
+                    }
+                    BottomCard(stats, statsActions)
+                }
             }
 
             // Drawer: full-screen scrim + slide-in panel.
@@ -300,6 +366,7 @@ class MainActivity : ComponentActivity() {
                 note = app.locationNotes[s.key] ?: "",
                 latLng = s.latLng,
                 onDismiss = { activeSheet = null },
+                onDirections = { activeSheet = null; startDirections(s.latLng, s.title) },
                 onNote = { activeSheet = null; noteKey = s.key },
                 onCollection = { activeSheet = null; openCollection(s.key) },
                 onDelete = { activeSheet = null; deleteKey = s.key },
@@ -312,6 +379,7 @@ class MainActivity : ComponentActivity() {
                     isSaved = isSaved(key),
                     placesClient = placesClient, photoCache = photoCache, isOpenCache = isOpenCache,
                     onDismiss = { activeSheet = null },
+                    onDirections = { activeSheet = null; startDirections(s.latLng, s.name) },
                     onNote = { activeSheet = null; ensureSaved(s.latLng, s.name, s.place.id); noteKey = key },
                     onCollection = { activeSheet = null; ensureSaved(s.latLng, s.name, s.place.id); openCollection(key) },
                     onDelete = { activeSheet = null; deleteKey = key },
@@ -514,6 +582,145 @@ class MainActivity : ComponentActivity() {
         if (lat != 0.0 && lng != 0.0) animateTo(LatLng(lat, lng), 18f)
     }
 
+    /* ── Directions ─────────────────────────────────────────────────────── */
+
+    private fun startDirections(dest: LatLng, name: String) {
+        if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
+        routeDest = dest; routeDestName = name; travelMode = TravelMode.DRIVE
+        fetchRouteAndShow()
+    }
+
+    private fun changeTravelMode(mode: TravelMode) {
+        if (mode == travelMode) return
+        travelMode = mode
+        fetchRouteAndShow()
+    }
+
+    private fun fetchRouteAndShow() {
+        val dest = routeDest ?: return
+        routeLoading = true; routes = emptyList(); routePoints = emptyList()
+        uiScope?.launch {
+            val result = fetchRoute(LatLng(savedLat, savedLng), dest, travelMode, BuildConfig.MAPS_API_KEY)
+            if (routeDest != dest) return@launch // user closed/changed while loading
+            routeLoading = false
+            if (result.isEmpty()) { toast("Couldn't find a route."); return@launch }
+            routes = result; selectedRouteIndex = 0; routePoints = result[0].points
+            fitToRoute(result[0].points)
+        }
+    }
+
+    private fun selectRoute(i: Int) {
+        if (i !in routes.indices) return
+        selectedRouteIndex = i; routePoints = routes[i].points
+        if (!navigating) fitToRoute(routes[i].points)
+    }
+
+    private fun fitToRoute(points: List<LatLng>) {
+        if (points.isEmpty()) return
+        val b = LatLngBounds.Builder().apply { points.forEach { include(it) } }.build()
+        uiScope?.launch { camState?.animate(CameraUpdateFactory.newLatLngBounds(b, 140)) }
+    }
+
+    private fun closeDirections() {
+        if (navigating) { navigating = false; tts?.stop(); exitNavLocationUpdates() }
+        routeDest = null; routeDestName = ""; routes = emptyList(); routePoints = emptyList()
+        routeLoading = false; currentStepIndex = 0; navDistanceToNext = 0
+    }
+
+    /* ── Live turn-by-turn navigation ───────────────────────────────────── */
+
+    private fun startNavigation() {
+        val route = routes.getOrNull(selectedRouteIndex) ?: return
+        navigating = true; currentStepIndex = 0
+        navDistanceToNext = route.steps.firstOrNull()?.distanceMeters ?: 0
+        rerouting = false; offRouteCount = 0; lastRerouteTime = System.currentTimeMillis()
+        enterNavLocationUpdates()
+        route.steps.firstOrNull()?.let { speak(it.instruction) }
+        updateNavigationCamera(LatLng(savedLat, savedLng), camState?.position?.bearing ?: 0f)
+    }
+
+    private fun exitNavigation() {
+        navigating = false
+        tts?.stop()
+        exitNavLocationUpdates()
+        routes.getOrNull(selectedRouteIndex)?.let { fitToRoute(it.points) }
+    }
+
+    /** Called from updateUIValues on each fix while navigating: reroute/re-time, follow, advance steps. */
+    private fun updateNavigation(loc: Location) {
+        val route = routes.getOrNull(selectedRouteIndex) ?: return
+        val here = LatLng(loc.latitude, loc.longitude)
+        val now = System.currentTimeMillis()
+
+        // Off-route reroute (>50m off the path for 2 fixes) vs. live traffic re-timing (periodic, DRIVE).
+        val offPath = distanceToPathMeters(here, routePoints)
+        if (offPath > 50f) {
+            offRouteCount++
+            if (offRouteCount >= 2 && !rerouting && now - lastRerouteTime > 8000L) reroute(announce = true)
+        } else {
+            offRouteCount = 0
+            if (travelMode == TravelMode.DRIVE && !rerouting && now - lastRerouteTime > 90000L) reroute(announce = false)
+        }
+
+        val bearing = if (loc.hasBearing()) loc.bearing else camState?.position?.bearing ?: 0f
+        updateNavigationCamera(here, bearing)
+
+        val steps = route.steps
+        if (currentStepIndex >= steps.size) return
+        val step = steps[currentStepIndex]
+        if (step.endLat == 0.0 && step.endLng == 0.0) return
+        val res = FloatArray(1)
+        Location.distanceBetween(loc.latitude, loc.longitude, step.endLat, step.endLng, res)
+        navDistanceToNext = res[0].toInt()
+        if (res[0] < 25f) { // reached this maneuver — advance & announce the next one
+            currentStepIndex++
+            if (currentStepIndex < steps.size) speak(steps[currentStepIndex].instruction)
+            else speak("You have arrived at your destination")
+        }
+    }
+
+    /** Re-fetch from the current position → destination. Powers both off-route rerouting (voiced)
+     *  and live traffic re-timing (silent, periodic). The fresh route starts at the user, so the
+     *  first step is the upcoming maneuver and the ETA reflects current traffic. */
+    private fun reroute(announce: Boolean) {
+        val dest = routeDest ?: return
+        if (rerouting) return
+        rerouting = true
+        lastRerouteTime = System.currentTimeMillis()
+        if (announce) speak("Rerouting")
+        uiScope?.launch {
+            val result = fetchRoute(LatLng(savedLat, savedLng), dest, travelMode, BuildConfig.MAPS_API_KEY)
+            rerouting = false
+            if (!navigating || result.isEmpty()) return@launch
+            routes = result; selectedRouteIndex = 0; routePoints = result[0].points
+            currentStepIndex = 0; offRouteCount = 0
+            navDistanceToNext = result[0].steps.firstOrNull()?.distanceMeters ?: 0
+        }
+    }
+
+    private fun updateNavigationCamera(target: LatLng, bearing: Float) {
+        val pos = CameraPosition.Builder().target(target).zoom(17.5f).tilt(50f).bearing(bearing).build()
+        uiScope?.launch { camState?.animate(CameraUpdateFactory.newCameraPosition(pos), 800) }
+    }
+
+    private fun enterNavLocationUpdates() {
+        if (!hasLocationPermission()) return
+        fusedLocClient.removeLocationUpdates(locCallBack)
+        val navReq = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L).setMinUpdateIntervalMillis(500L).build()
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
+            fusedLocClient.requestLocationUpdates(navReq, locCallBack, mainLooper)
+    }
+
+    private fun exitNavLocationUpdates() {
+        fusedLocClient.removeLocationUpdates(locCallBack)
+        if (sidebar.tracking) startLocationUpdates()
+    }
+
+    private fun speak(text: String) {
+        if (!voiceEnabled || text.isEmpty()) return
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav")
+    }
+
     /* ── Location ───────────────────────────────────────────────────────── */
 
     private fun setupLocationRequest() {
@@ -552,6 +759,7 @@ class MainActivity : ComponentActivity() {
         stats.accuracy = String.format("%.1fm", loc.accuracy)
         stats.altitude = if (loc.hasAltitude()) String.format("%.1fm", loc.altitude) else "N/A"
         stats.speed = if (loc.hasSpeed()) String.format("%.1fkm/h", loc.speed * 3.6f) else "0km/h"
+        if (navigating) { updateNavigation(loc); return }
         maybeGeocodeAddress(savedLat, savedLng)
         if (firstFix && savedLat != 0.0) { camState?.move(CameraUpdateFactory.newLatLngZoom(LatLng(savedLat, savedLng), 18f)); firstFix = false }
     }
