@@ -35,6 +35,7 @@ data class GroupMessage(
     val pinLng: Double? = null,
     val pinName: String = "",
     val pinNote: String = "",
+    val pinPlaceId: String = "",   // set when the shared pin is a Google landmark → opens its in-app place page
 )
 
 object Groups {
@@ -112,7 +113,8 @@ object Groups {
                     GroupMessage(it.id, it.getString("from") ?: "", it.getString("fromTag") ?: "",
                         it.getString("text") ?: "", it.getString("image") ?: "",
                         it.getDouble("pinLat"), it.getDouble("pinLng"),
-                        it.getString("pinName") ?: "", it.getString("pinNote") ?: "")
+                        it.getString("pinName") ?: "", it.getString("pinNote") ?: "",
+                        it.getString("pinPlaceId") ?: "")
                 })
             }
 
@@ -128,10 +130,10 @@ object Groups {
     }
 
     /** Share a personal pin/note into a group's chat as a tappable location card. */
-    fun sharePin(gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String) {
+    fun sharePin(gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String, placeId: String) {
         post(gid, mapOf(
             "from" to fromUid, "fromTag" to fromTag, "text" to "",
-            "pinLat" to lat, "pinLng" to lng, "pinName" to name, "pinNote" to note,
+            "pinLat" to lat, "pinLng" to lng, "pinName" to name, "pinNote" to note, "pinPlaceId" to placeId,
         ))
     }
 

@@ -140,6 +140,9 @@ fun PlaceDetailsSheet(
     onDirections: () -> Unit,
     onNote: () -> Unit,
     onCollection: () -> Unit,
+    onShareToGroup: () -> Unit,
+    canAddToMap: Boolean,
+    onAddToMap: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -222,6 +225,8 @@ fun PlaceDetailsSheet(
                     Box(Modifier.weight(1f)) { SheetButton("✏️  Note", onSurface.copy(alpha = 0.06f), TealDeep, onNote) }
                     Box(Modifier.weight(1f)) { SheetButton("📁  Collection", onSurface.copy(alpha = 0.06f), TealDeep, onCollection) }
                 }
+                Spacer(Modifier.height(10.dp))
+                SheetButton("📤  Share to group", onSurface.copy(alpha = 0.06f), TealDeep, onShareToGroup)
             }
 
             // Details card
@@ -258,10 +263,12 @@ fun PlaceDetailsSheet(
                 }
             }
 
-            if (isSaved) {
+            // Add-to-map only appears when this place was opened from a shared card (not normal browsing).
+            if (isSaved || canAddToMap) {
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.padding(horizontal = 20.dp)) {
-                    SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Red, onDelete)
+                    if (isSaved) SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Red, onDelete)
+                    else SheetButton("➕  Add to map", Teal, Color.White, onAddToMap)
                 }
             }
         }
