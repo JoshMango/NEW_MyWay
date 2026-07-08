@@ -22,11 +22,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +52,7 @@ fun DirectionsPanel(
     loading: Boolean,
     routes: List<RouteResult>,
     selectedIndex: Int,
+    isTripDirection: Boolean = false,
     onMode: (TravelMode) -> Unit,
     onSelectRoute: (Int) -> Unit,
     onStart: () -> Unit,
@@ -70,10 +73,12 @@ fun DirectionsPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("DIRECTIONS TO", fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp, color = TealDeep)
+                    Text(if (isTripDirection) "🔴  TRIP DIRECTION" else "DIRECTIONS TO", fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = TealDeep)
                     Text(destName.ifEmpty { "Destination" }, fontSize = 19.sp, fontWeight = FontWeight.Bold,
                         color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (isTripDirection) Text("Shared with everyone on the trip", fontSize = 12.sp,
+                        color = onSurface.copy(alpha = 0.6f))
                 }
                 CircleIcon("✕", onSurface, onSurface.copy(alpha = 0.06f), onClose)
             }
@@ -318,3 +323,35 @@ private fun formatDuration(seconds: Int): String {
 
 private fun formatDistance(meters: Int): String =
     if (meters < 1000) "$meters m" else String.format("%.1f km", meters / 1000.0)
+
+/** Asked when you tap Directions during a trip: route the whole trip, or just yourself. */
+@Composable
+fun TripDirectionDialog(name: String, onTrip: () -> Unit, onMeOnly: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Directions to ${name.ifEmpty { "destination" }}", fontWeight = FontWeight.Bold) },
+        text = { Text("Share this route with everyone on the trip, or keep it to yourself? " +
+            "Setting a trip direction replaces the current one and lasts until everyone arrives or ends it.") },
+        confirmButton = {
+            TextButton(onClick = onTrip) { Text("Set as trip direction", color = TealDeep, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onMeOnly) { Text("Include me only") } },
+    )
+}
+
+/** Shown when another member sets a trip direction — join it or opt out. Never auto-routes you. */
+@Composable
+fun IncomingTripDirectionDialog(byLabel: String, byPhoto: String, destName: String, onJoin: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AvatarCircle(photo = byPhoto, fallback = byLabel, size = 36.dp)
+                Text("$byLabel set a trip direction", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = { Text("Head to ${destName.ifEmpty { "the destination" }} with the trip?") },
+        confirmButton = { TextButton(onClick = onJoin) { Text("Join", color = TealDeep, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
+}

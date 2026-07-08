@@ -99,9 +99,12 @@ class GroupChatActivity : ComponentActivity() {
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
                     onJoinTrip = { joinTrip() },
-                    onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") } },
+                    onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") else Groups.postSystem(gid, "👋 @$myTag left the trip") } },
                     onEndTrip = { Trip.endSession(gid) { err -> if (err != null) toast("Couldn't end trip: $err") } },
                     onOpenPin = { m -> openSharedPin(m) },
+                    onOpenLive = { m -> startActivity(Intent(this, LiveLocationActivity::class.java).apply {
+                        putExtra("uid", m.liveFrom); putExtra("name", "@${m.fromTag}")
+                    }) },
                     actions = groupActions,
                 )
             }
@@ -150,7 +153,10 @@ class GroupChatActivity : ComponentActivity() {
         // Join is the critical write; surface any error so a denied write isn't silent.
         Trip.join(uid, gid, myTag, appRef.getUserPhoto(uid), appRef.lastLat, appRef.lastLng) { err ->
             if (err != null) toast("Couldn't join: $err")
-            else TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
+            else {
+                TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
+                Groups.postSystem(gid, "🚗 @$myTag joined the trip")
+            }
         }
         // Mark the session ongoing (best-effort; not needed if it's already active).
         if (s.group?.tripActive != true) Trip.startSession(gid) { err -> if (err != null) toast("Couldn't mark live: $err") }
@@ -193,6 +199,7 @@ private fun ChatScreen(
     onLeaveTrip: () -> Unit,
     onEndTrip: () -> Unit,
     onOpenPin: (GroupMessage) -> Unit,
+    onOpenLive: (GroupMessage) -> Unit,
     actions: GroupActions,
 ) {
     var showInfo by remember { mutableStateOf(false) }
@@ -219,7 +226,7 @@ private fun ChatScreen(
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
-            MessageList(s.messages, myUid, onOpenPin, Modifier.weight(1f))
+            MessageList(s.messages, myUid, onOpenPin, onOpenLive, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
     }
@@ -278,7 +285,8 @@ private fun TripBar(
 }
 
 @Composable
-private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: (GroupMessage) -> Unit, modifier: Modifier) {
+private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: (GroupMessage) -> Unit,
+                        onOpenLive: (GroupMessage) -> Unit, modifier: Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -291,12 +299,20 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: 
     }
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 12.dp), state = listState,
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(messages, key = { it.id }) { m -> MessageBubble(m, mine = m.from == myUid, onOpenPin) }
+        items(messages, key = { it.id }) { m -> MessageBubble(m, mine = m.from == myUid, onOpenPin, onOpenLive) }
     }
 }
 
 @Composable
-private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessage) -> Unit) {
+private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit) {
+    if (m.system) {
+        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+            Text(m.text, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+        }
+        return
+    }
+    val isLive = m.liveFrom.isNotEmpty()
     val isPin = m.pinLat != null && m.pinLng != null
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
@@ -304,11 +320,18 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessa
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
                 .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
                 .then(if (isPin) Modifier.clickable { onOpenPin(m) } else Modifier)
+                .then(if (isLive) Modifier.clickable { onOpenLive(m) } else Modifier)
                 .padding(horizontal = if (m.image.isNotEmpty()) 4.dp else 12.dp, vertical = if (m.image.isNotEmpty()) 4.dp else 8.dp),
         ) {
             if (!mine) Text("@${m.fromTag}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep,
                 modifier = Modifier.padding(horizontal = if (m.image.isNotEmpty()) 8.dp else 0.dp))
             when {
+                isLive -> {
+                    val onCard = if (mine) Color.White else MaterialTheme.colorScheme.onSurface
+                    Text("🔴 Live location", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
+                    Text("Tap to follow on map", fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (mine) Color.White.copy(alpha = 0.85f) else TealDeep, modifier = Modifier.padding(top = 6.dp))
+                }
                 isPin -> {
                     val onCard = if (mine) Color.White else MaterialTheme.colorScheme.onSurface
                     Text("📍 ${m.pinName.ifEmpty { "Shared location" }}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
@@ -476,13 +499,18 @@ private fun MemberRow(g: Group, memberUid: String, myUid: String, iAmOwner: Bool
     val isAdmin = g.isAdmin(memberUid)
     val roleLabel = when { isOwner -> "Owner"; isAdmin -> "Admin"; else -> null }
     val canKick = iAmAdmin && !isOwner && memberUid != myUid   // admins kick anyone but the owner and themselves
+    var showCard by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        AvatarCircle(photo = "", fallback = g.tagOf(memberUid), size = 36.dp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text("@${g.tagOf(memberUid)}" + if (memberUid == myUid) " (you)" else "",
-                fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-            roleLabel?.let { Text(it, fontSize = 11.sp, color = TealDeep, fontWeight = FontWeight.Bold) }
+        // Tap the person → their profile card.
+        Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { showCard = true },
+            verticalAlignment = Alignment.CenterVertically) {
+            AvatarCircle(photo = "", fallback = g.tagOf(memberUid), size = 36.dp)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("@${g.tagOf(memberUid)}" + if (memberUid == myUid) " (you)" else "",
+                    fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                roleLabel?.let { Text(it, fontSize = 11.sp, color = TealDeep, fontWeight = FontWeight.Bold) }
+            }
         }
         if (iAmOwner && !isOwner) {   // owner-only: promote/demote
             TextButton(onClick = { actions.onSetAdmin(memberUid, !isAdmin) }) {
@@ -491,6 +519,7 @@ private fun MemberRow(g: Group, memberUid: String, myUid: String, iAmOwner: Bool
         }
         if (canKick) TextButton(onClick = { actions.onKick(memberUid) }) { Text("Kick", color = Danger, fontSize = 13.sp) }
     }
+    if (showCard) ProfileCardDialog(memberUid, g.tagOf(memberUid)) { showCard = false }
 }
 
 @Composable

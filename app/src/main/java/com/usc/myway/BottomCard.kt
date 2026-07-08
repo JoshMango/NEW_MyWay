@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
@@ -39,13 +38,12 @@ class StatsState {
     var accuracy by mutableStateOf("--")
     var speed by mutableStateOf("0km/h")
     var address by mutableStateOf("Waiting for location…")
-    var savedAddress by mutableStateOf("") // set-address result; blank = hidden chip
     var pinMode by mutableStateOf(false)   // Pin vs Cancel label
     var tracking by mutableStateOf(true)   // false hides the live GPS stat tiles
+    var sharingLive by mutableStateOf(false) // Share button reflects an active live-location share
 }
 
 interface StatsActions {
-    fun onSave()
     fun onPin()
     fun onShare()
 }
@@ -63,37 +61,27 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
             Row(verticalAlignment = Alignment.Top) {
                 Text("📍", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("CURRENT ADDRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDeep)
+                    Text("CURRENT LOCATION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDeep)
                     Text(state.address, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2,
                         overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
-            if (state.savedAddress.isNotEmpty()) {
-                Text("📍 ${state.savedAddress}", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = TealDeep,
-                    modifier = Modifier.padding(start = 24.dp, top = 4.dp).clip(RoundedCornerShape(8.dp))
-                        .background(Teal.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 4.dp))
-            }
-
             // Actions
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = actions::onSave, shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color.White),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-                    modifier = Modifier.weight(1f),
-                ) { Text("💾 Save", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                 val tonal = ButtonDefaults.filledTonalButtonColors(containerColor = Teal.copy(alpha = 0.12f), contentColor = TealDeep)
                 FilledTonalButton(
                     onClick = actions::onPin, shape = RoundedCornerShape(12.dp), colors = tonal,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
                 ) { Text(if (state.pinMode) "📌 Cancel" else "📌 Pin", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                val shareColors = if (state.sharingLive)
+                    ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.14f), contentColor = Color(0xFFEF4444))
+                else tonal
                 FilledTonalButton(
-                    onClick = actions::onShare, shape = RoundedCornerShape(12.dp), colors = tonal,
+                    onClick = actions::onShare, shape = RoundedCornerShape(12.dp), colors = shareColors,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text("📤 Share", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(if (state.sharingLive) "🔴 Live" else "📍 Share", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
             }
 
             // Stats — live GPS values, hidden when tracking is off.

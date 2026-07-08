@@ -17,15 +17,15 @@
         android:roundIcon="@drawable/ic_launcher_logo"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyWay">
-        <activity
-            android:name=".MapPickerActivity"
-            android:exported="false" />
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />
 
         <activity
-            android:name=".ShowSavedLocations"
+            android:name=".CollectionsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LiveLocationActivity"
             android:exported="false" />
         <activity
             android:name=".MainActivity"

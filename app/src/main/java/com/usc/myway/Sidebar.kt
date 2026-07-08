@@ -46,21 +46,20 @@ private val Danger = Color(0xFFEF4444)
 class SidebarState {
     var darkMode by mutableStateOf(false)
     var tracking by mutableStateOf(true)
-    var gpsHighAccuracy by mutableStateOf(false)
+    var userName by mutableStateOf("")   // for the Discord-style profile header
+    var userTag by mutableStateOf("")
+    var userPhoto by mutableStateOf("")
 }
 
 /** Callbacks the drawer fires back to the activity. */
 interface SidebarActions {
-    fun onNewWaypoint()
-    fun onShowWaypoints()
-    fun onSetAddress()
+    fun onCollections()
     fun onProfile()
     fun onFriends()
     fun onGroups()
     fun onToggleTheme()
     fun onLogout()
     fun onTrackingChanged(enabled: Boolean)
-    fun onGpsModeChanged(highAccuracy: Boolean)
 }
 
 @Composable
@@ -86,21 +85,34 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
             }
 
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                SectionLabel("NAVIGATE")
-                SbItem("➕", "Add Waypoint", actions::onNewWaypoint)
-                SbItem("📋", "Saved Waypoints", actions::onShowWaypoints)
-                SbItem("🎯", "Set Address", actions::onSetAddress)
+                // Discord-style profile header — tap to open profile settings.
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = actions::onProfile)
+                        .background(Teal.copy(alpha = 0.10f)).padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AvatarCircle(photo = state.userPhoto, fallback = state.userTag.ifBlank { "?" }, size = 44.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(state.userName.ifBlank { "Set up your profile" }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                        if (state.userTag.isNotBlank()) Text("@${state.userTag}", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                SectionLabel("PLACES")
+                SbItem("📁", "Collections", actions::onCollections)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")
-                SbItem("😀", "My Profile", actions::onProfile)
                 SbItem("👥", "Friends", actions::onFriends)
                 SbItem("🧭", "Groups", actions::onGroups)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")
                 SbToggle("📡", "Tracking", state.tracking) { state.tracking = it; actions.onTrackingChanged(it) }
-                SbToggle("🛰️", "GPS Mode", state.gpsHighAccuracy) { state.gpsHighAccuracy = it; actions.onGpsModeChanged(it) }
                 SbItem(
                     if (state.darkMode) "☀️" else "🌙",
                     if (state.darkMode) "Light Mode" else "Dark Mode",

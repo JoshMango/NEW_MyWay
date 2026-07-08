@@ -2,8 +2,15 @@
 // Hosted in a ComposeView; on selection it hands the LatLng back so the activity recenters the map.
 package com.usc.myway
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -24,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,17 +50,33 @@ import kotlinx.coroutines.withContext
 
 private val Teal = Color(0xFF00C99D)
 
-/** Java-friendly callback: fired with the chosen place's coordinates. */
+/** Java-friendly callback: fired with the chosen place's id, name, and coordinates. */
 fun interface PlacePickedListener {
-    fun onPicked(latLng: LatLng)
+    fun onPicked(placeId: String, name: String, latLng: LatLng)
 }
 
 @Composable
 internal fun SearchBar(placesClient: PlacesClient, onPicked: PlacePickedListener) {
+    val ctx = LocalContext.current
     var query by remember { mutableStateOf("") }
     var predictions by remember { mutableStateOf<List<AutocompletePrediction>>(emptyList()) }
     var token by remember { mutableStateOf(AutocompleteSessionToken.newInstance()) }
     var justPicked by remember { mutableStateOf(false) }
+
+    // Voice search: the system speech UI handles the mic permission; we just take the transcript.
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { query = it }
+        }
+    }
+    fun startVoice() {
+        try {
+            voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search for a place")
+            })
+        } catch (_: Exception) { Toast.makeText(ctx, "Voice search isn't available", Toast.LENGTH_SHORT).show() }
+    }
 
     // Debounced autocomplete: one request ~300ms after typing stops, grouped by a session token
     // so the whole search + the final fetchPlace bill as one cheaper Places session.
@@ -79,8 +103,11 @@ internal fun SearchBar(placesClient: PlacesClient, onPicked: PlacePickedListener
             placeholder = { Text("Search location…") },
             leadingIcon = { Text("🔍", fontSize = 16.sp) },
             trailingIcon = {
-                if (query.isNotEmpty()) Text("✕", modifier = Modifier
-                    .clickable { query = ""; predictions = emptyList() }.padding(8.dp))
+                Row {
+                    Text("🎙️", fontSize = 16.sp, modifier = Modifier.clickable { startVoice() }.padding(8.dp))
+                    if (query.isNotEmpty()) Text("✕", modifier = Modifier
+                        .clickable { query = ""; predictions = emptyList() }.padding(8.dp))
+                }
             },
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
@@ -102,11 +129,12 @@ internal fun SearchBar(placesClient: PlacesClient, onPicked: PlacePickedListener
                     items(predictions) { pred ->
                         Column(Modifier.fillMaxWidth().clickable {
                             justPicked = true
-                            query = pred.getPrimaryText(null).toString()
+                            val placeName = pred.getPrimaryText(null).toString()
+                            query = placeName
                             predictions = emptyList()
                             placesClient.fetchPlace(
                                 FetchPlaceRequest.builder(pred.placeId, listOf(Place.Field.LAT_LNG)).setSessionToken(token).build()
-                            ).addOnSuccessListener { resp -> resp.place.latLng?.let(onPicked::onPicked) }
+                            ).addOnSuccessListener { resp -> resp.place.latLng?.let { onPicked.onPicked(pred.placeId, placeName, it) } }
                             token = AutocompleteSessionToken.newInstance() // end session; fresh token next search
                         }.padding(horizontal = 14.dp, vertical = 10.dp)) {
                             Text(pred.getPrimaryText(null).toString(), fontWeight = FontWeight.SemiBold,

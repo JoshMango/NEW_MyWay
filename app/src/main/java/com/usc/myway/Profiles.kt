@@ -60,6 +60,19 @@ object Profiles {
             .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not save photo") }
     }
 
+    // Banner = a wide Discord-style profile cover. Kept in its OWN doc (not users/{uid}) so friend search,
+    // which pulls whole user docs, stays light — the big blob is only fetched when a profile card opens.
+    fun updateBanner(uid: String, base64: String, onDone: (String?) -> Unit) {
+        db.collection("user_banners").document(uid).set(mapOf("banner" to base64))
+            .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not save banner") }
+    }
+
+    fun fetchBanner(uid: String, onResult: (String) -> Unit) {
+        db.collection("user_banners").document(uid).get()
+            .addOnSuccessListener { onResult(it.getString("banner") ?: "") }
+            .addOnFailureListener { onResult("") }
+    }
+
     sealed interface ClaimResult {
         data class Success(val tag: String) : ClaimResult
         data object Taken : ClaimResult

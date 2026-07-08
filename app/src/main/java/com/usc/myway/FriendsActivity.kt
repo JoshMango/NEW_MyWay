@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -273,23 +274,29 @@ private fun FriendsTab(s: FriendsState, actions: FriendsActions) {
 // ── Shared bits ─────────────────────────────────────────────────────────────────
 @Composable
 private fun UserRow(hit: UserHit, trailing: @Composable () -> Unit) {
+    var showCard by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AvatarCircle(photo = hit.photo, fallback = hit.tag)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text("@${hit.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurface)
-            if (hit.fullName.isNotBlank()) {
-                Text(hit.fullName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        // Tapping the person (avatar + name) opens their profile card.
+        Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { showCard = true },
+            verticalAlignment = Alignment.CenterVertically) {
+            AvatarCircle(photo = hit.photo, fallback = hit.tag)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("@${hit.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface)
+                if (hit.fullName.isNotBlank()) {
+                    Text(hit.fullName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
             }
         }
         trailing()
     }
+    if (showCard) ProfileCardDialog(hit.uid, hit.tag, hit.fullName) { showCard = false }
 }
 
 @Composable
