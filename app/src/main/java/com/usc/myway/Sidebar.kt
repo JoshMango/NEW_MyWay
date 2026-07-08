@@ -54,6 +54,7 @@ interface SidebarActions {
     fun onNewWaypoint()
     fun onShowWaypoints()
     fun onSetAddress()
+    fun onProfile()
     fun onFriends()
     fun onToggleTheme()
     fun onLogout()
@@ -91,6 +92,7 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")
+                SbItem("😀", "My Profile", actions::onProfile)
                 SbItem("👥", "Friends", actions::onFriends)
 
                 Spacer(Modifier.height(12.dp))
