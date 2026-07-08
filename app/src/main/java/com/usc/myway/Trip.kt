@@ -16,7 +16,9 @@ import java.util.Date
 object Trip {
 
     data class Member(val uid: String, val tag: String, val photo: String, val lat: Double?, val lng: Double?)
-    data class TripPin(val id: String, val from: String, val fromTag: String, val lat: Double, val lng: Double, val name: String, val note: String)
+    data class TripPin(val id: String, val from: String, val fromTag: String, val fromPhoto: String, val lat: Double, val lng: Double, val name: String, val note: String)
+    /** A shared destination for the whole trip. [done] = uids who've arrived or ended it; cleared once all live members are done. */
+    data class TripDest(val id: String, val lat: Double, val lng: Double, val name: String, val by: String, val byTag: String, val done: List<String>)
 
     // A member is considered gone if their heartbeat is older than this (crash/no-cleanup guard).
     // The foreground service heartbeats every ~20s, so 60s is a safe 3× margin.
@@ -100,10 +102,55 @@ object Trip {
         }.addOnFailureListener { onDone(it.message ?: "Failed") }
     }
 
+    // ── Shared trip direction ───────────────────────────────────────────────────────
+    // Stored inline on the group doc as `tripDest`, so joining/leaving doesn't touch it.
+
+    /** Set (or overwrite) the trip's shared destination — everyone live gets routed to it. */
+    fun setTripDest(gid: String, lat: Double, lng: Double, name: String, byUid: String, byTag: String, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).update(
+            "tripDest", mapOf(
+                "id" to System.currentTimeMillis().toString(),  // ponytail: ms id; only used to tell a fresh dest from the old one
+                "lat" to lat, "lng" to lng, "name" to name, "by" to byUid, "byTag" to byTag, "done" to emptyList<String>(),
+            )
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not set trip direction") }
+    }
+
+    fun listenTripDest(gid: String, onChange: (TripDest?) -> Unit): ListenerRegistration =
+        db.collection("groups").document(gid).addSnapshotListener { d, _ ->
+            @Suppress("UNCHECKED_CAST")
+            val m = (d?.get("tripDest") as? Map<String, Any>)
+            val lat = (m?.get("lat") as? Number)?.toDouble()
+            val lng = (m?.get("lng") as? Number)?.toDouble()
+            onChange(if (m == null || lat == null || lng == null) null else TripDest(
+                id = m["id"]?.toString() ?: "", lat = lat, lng = lng,
+                name = m["name"]?.toString() ?: "", by = m["by"]?.toString() ?: "", byTag = m["byTag"]?.toString() ?: "",
+                done = (m["done"] as? List<*>)?.map { it.toString() } ?: emptyList(),
+            ))
+        }
+
+    /**
+     * Mark that I've finished the current trip direction (arrived or pressed end). Ends it only for me;
+     * once every live member is done, it clears for everyone. Overwriting with a new dest resets [done].
+     */
+    fun endTripDestForMe(gid: String, uid: String) {
+        val groupRef = db.collection("groups").document(gid)
+        groupRef.update("tripDest.done", FieldValue.arrayUnion(uid)).addOnSuccessListener {
+            db.collection("trip_participants").whereEqualTo("gid", gid).get().addOnSuccessListener { parts ->
+                groupRef.get().addOnSuccessListener { g ->
+                    @Suppress("UNCHECKED_CAST")
+                    val dest = g.get("tripDest") as? Map<String, Any> ?: return@addOnSuccessListener
+                    val done = (dest["done"] as? List<*>)?.map { it.toString() }?.toSet() ?: emptySet()
+                    val live = parts.documents.filter { fresh(it) }.mapNotNull { it.getString("uid") }
+                    if (live.isNotEmpty() && live.all { it in done }) groupRef.update("tripDest", FieldValue.delete())
+                }
+            }
+        }
+    }
+
     // ── Shared pins ───────────────────────────────────────────────────────────────
-    fun sharePin(gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String) {
+    fun sharePin(gid: String, fromUid: String, fromTag: String, fromPhoto: String, lat: Double, lng: Double, name: String, note: String) {
         db.collection("groups").document(gid).collection("trip_pins").document().set(
-            mapOf("from" to fromUid, "fromTag" to fromTag, "lat" to lat, "lng" to lng,
+            mapOf("from" to fromUid, "fromTag" to fromTag, "fromPhoto" to fromPhoto, "lat" to lat, "lng" to lng,
                 "name" to name, "note" to note, "createdAt" to FieldValue.serverTimestamp())
         )
     }
@@ -114,8 +161,8 @@ object Trip {
                 if (snap != null) onChange(snap.documents.mapNotNull { d ->
                     val lat = d.getDouble("lat") ?: return@mapNotNull null
                     val lng = d.getDouble("lng") ?: return@mapNotNull null
-                    TripPin(d.id, d.getString("from") ?: "", d.getString("fromTag") ?: "", lat, lng,
-                        d.getString("name") ?: "", d.getString("note") ?: "")
+                    TripPin(d.id, d.getString("from") ?: "", d.getString("fromTag") ?: "", d.getString("fromPhoto") ?: "",
+                        lat, lng, d.getString("name") ?: "", d.getString("note") ?: "")
                 })
             }
 

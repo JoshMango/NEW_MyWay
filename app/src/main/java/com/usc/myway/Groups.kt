@@ -36,6 +36,8 @@ data class GroupMessage(
     val pinName: String = "",
     val pinNote: String = "",
     val pinPlaceId: String = "",   // set when the shared pin is a Google landmark → opens its in-app place page
+    val system: Boolean = false,   // trip join/leave notices etc — rendered as a centered chip, not a bubble
+    val liveFrom: String = "",     // uid of a live-location sharer → rendered as a tappable live card
 )
 
 object Groups {
@@ -114,9 +116,21 @@ object Groups {
                         it.getString("text") ?: "", it.getString("image") ?: "",
                         it.getDouble("pinLat"), it.getDouble("pinLng"),
                         it.getString("pinName") ?: "", it.getString("pinNote") ?: "",
-                        it.getString("pinPlaceId") ?: "")
+                        it.getString("pinPlaceId") ?: "", it.getBoolean("system") ?: false,
+                        it.getString("liveFrom") ?: "")
                 })
             }
+
+    /** Announce a live-location share in the chat; the card reads live_shares/{fromUid} when tapped. */
+    fun postLiveShare(gid: String, fromUid: String, fromTag: String) {
+        post(gid, mapOf("from" to fromUid, "fromTag" to fromTag, "text" to "", "liveFrom" to fromUid))
+    }
+
+    /** A centered notice in the chat (e.g. "@x joined the trip"). from="system" so no bubble/avatar. */
+    fun postSystem(gid: String, text: String) {
+        if (text.isBlank()) return
+        post(gid, mapOf("from" to "system", "fromTag" to "", "text" to text, "system" to true))
+    }
 
     fun sendMessage(gid: String, fromUid: String, fromTag: String, text: String) {
         val body = text.trim()

@@ -168,6 +168,10 @@ class MainActivity : ComponentActivity() {
     private var selectedRouteIndex by mutableIntStateOf(0)
     private var routePoints by mutableStateOf<List<LatLng>>(emptyList())
     private var travelMode by mutableStateOf(TravelMode.DRIVE)
+    private var routeIsTrip by mutableStateOf(false)                 // current route is the shared trip direction
+    private var directionChoice by mutableStateOf<Pair<LatLng, String>?>(null) // pending "trip vs me only" prompt
+    private var incomingTripDest by mutableStateOf<Trip.TripDest?>(null)        // someone else set a trip direction → offer to join
+    private var showTripRoster by mutableStateOf(false)                         // tapping the live-trip bar → who's here
     // Live navigation
     private var navigating by mutableStateOf(false)
     private var currentStepIndex by mutableIntStateOf(0)
@@ -185,10 +189,15 @@ class MainActivity : ComponentActivity() {
     private var myTripListener: ListenerRegistration? = null
     private var tripMembersListener: ListenerRegistration? = null
     private var tripPinsListener: ListenerRegistration? = null
+    private var tripDestListener: ListenerRegistration? = null
     private var currentTripGid by mutableStateOf<String?>(null)
+    // Live location share (Messenger-style) — one live_shares/{myUid} doc, independent of trips.
+    private var liveShareListener: ListenerRegistration? = null
+    private var liveShare by mutableStateOf<LiveShare.State?>(null)
+    private var showLiveShareDialog by mutableStateOf(false)
     private var tripGroupName by mutableStateOf("")
     private var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
-    private var tripPins: List<Trip.TripPin> = emptyList()
+    private var tripPins by mutableStateOf<List<Trip.TripPin>>(emptyList())
 
     // Heading-up (compass) mode — rotates the map to the device's facing.
     private var headingMode by mutableStateOf(false)
@@ -214,12 +223,6 @@ class MainActivity : ComponentActivity() {
         hasLocationPerm = granted
         if (granted) startLocationUpdates()
     }
-    private val waypointPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode == RESULT_OK) res.data?.let { handleWaypointResult(it) }
-    }
-    private val addressPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode == RESULT_OK) res.data?.let { handleAddressResult(it) }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -230,7 +233,16 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
         setupLocationRequest()
 
-        sidebar.darkMode = isDarkMode(); sidebar.tracking = true; sidebar.gpsHighAccuracy = false
+        sidebar.darkMode = isDarkMode(); sidebar.tracking = true
+        // Drawer profile header — tag/photo from cache instantly; name from a one-shot profile fetch.
+        sidebar.userTag = app.getUserTag(myUid); sidebar.userPhoto = app.getUserPhoto(myUid)
+        if (myUid.isNotEmpty()) Profiles.fetchProfile(myUid) { p ->
+            if (p != null) {
+                sidebar.userName = "${p.firstName} ${p.lastName}".trim()
+                sidebar.userTag = p.tag.ifBlank { sidebar.userTag }
+                sidebar.userPhoto = p.photo
+            }
+        }
         hasLocationPerm = hasLocationPermission()
         if (!hasLocationPerm) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         else startLocationUpdates()
@@ -240,13 +252,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (myUid.isNotEmpty()) myTripListener = Trip.listenMyTrip(myUid) { gid -> onMyTripChanged(gid) }
+        if (myUid.isNotEmpty()) {
+            myTripListener = Trip.listenMyTrip(myUid) { gid -> onMyTripChanged(gid) }
+            liveShareListener = LiveShare.listen(myUid) { onLiveShareChanged(it) }
+        }
     }
 
     override fun onStop() {
         super.onStop()
-        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove()
-        myTripListener = null; tripMembersListener = null; tripPinsListener = null
+        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove()
+        myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null
+        liveShareListener?.remove(); liveShareListener = null
+    }
+
+    private fun onLiveShareChanged(s: LiveShare.State?) {
+        // A stale doc past its hour → tear it down (also stops any viewers). Otherwise reflect state.
+        if (s != null && !s.active) { LiveShare.stop(myUid); liveShare = null; stats.sharingLive = false; return }
+        liveShare = s
+        stats.sharingLive = s != null
     }
 
     override fun onResume() {
@@ -322,6 +345,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // RPG-style arrows to off-screen trip members (cleared automatically when they're visible / not on a trip).
+            if (currentTripGid != null && !navigating) TripMemberArrows(cam, tripMembers, myUid)
+
             val directionsActive = routeDest != null
 
             // Top: floating hamburger + search only (hidden while navigating).
@@ -339,7 +365,7 @@ class MainActivity : ComponentActivity() {
                     ) { Text("☰", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) }
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.weight(1f)) {
-                        SearchBar(placesClient, PlacePickedListener { ll -> animateTo(ll, 16f) })
+                        SearchBar(placesClient) { placeId, name, ll -> animateTo(ll, 16f); fetchAndShowPlace(placeId, name, ll) }
                     }
                 }
             }
@@ -347,7 +373,7 @@ class MainActivity : ComponentActivity() {
             // Live-trip bar — sits under the search row; tap Leave to go offline.
             if (currentTripGid != null && !navigating) {
                 Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 66.dp)) {
-                    TripLiveBar(tripGroupName, tripMembers.size) { leaveTrip() }
+                    TripLiveBar(tripGroupName, tripMembers.size, onClick = { showTripRoster = true }, onLeave = { leaveTrip() })
                 }
             }
 
@@ -384,6 +410,7 @@ class MainActivity : ComponentActivity() {
                             loading = routeLoading,
                             routes = routes,
                             selectedIndex = selectedRouteIndex,
+                            isTripDirection = routeIsTrip,
                             onMode = { changeTravelMode(it) },
                             onSelectRoute = { selectRoute(it) },
                             onStart = { startNavigation() },
@@ -447,22 +474,25 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun TripLiveBar(groupName: String, memberCount: Int, onLeave: () -> Unit) {
+    private fun TripLiveBar(groupName: String, memberCount: Int, onClick: () -> Unit, onLeave: () -> Unit) {
         Row(
             Modifier.shadow(6.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp))
                 .background(MaterialTheme.colorScheme.surface).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("🔴", fontSize = 12.sp)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                buildString {
-                    append("On trip")
-                    if (groupName.isNotEmpty()) append(" · ").append(groupName)
-                    append("  ·  ").append(memberCount).append(" here")
-                },
-                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("🔴", fontSize = 12.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    buildString {
+                        append("On trip")
+                        if (groupName.isNotEmpty()) append(" · ").append(groupName)
+                        append("  ·  ").append(memberCount).append(" here")
+                    },
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             Spacer(Modifier.width(10.dp))
             Box(
                 Modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xFFEF4444)).clickable(onClick = onLeave)
@@ -554,11 +584,16 @@ class MainActivity : ComponentActivity() {
         }
         collectionKey?.let { key ->
             val collections = app.collections
+            var creating by remember { mutableStateOf(false) }
+            var newName by remember { mutableStateOf("") }
             AlertDialog(
                 onDismissRequest = { collectionKey = null },
-                title = { Text("Add to Collection") },
+                title = { Text(if (creating) "New Collection" else "Add to Collection") },
                 text = {
-                    androidx.compose.foundation.layout.Column {
+                    if (creating) {
+                        OutlinedTextField(newName, { newName = it }, Modifier.fillMaxWidth(),
+                            label = { Text("Collection name") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                    } else androidx.compose.foundation.layout.Column {
                         CollectionRow("❌ None") { collections.forEach { it.locationKeys.remove(key) }; app.saveCollectionsToPrefs(); refresh(); collectionKey = null }
                         collections.forEach { c ->
                             val mark = if (c.locationKeys.contains(key)) "  ✓" else ""
@@ -567,10 +602,20 @@ class MainActivity : ComponentActivity() {
                                 c.locationKeys.add(key); app.saveCollectionsToPrefs(); refresh(); collectionKey = null
                             }
                         }
+                        CollectionRow("➕ New collection…") { creating = true }
                     }
                 },
-                confirmButton = {},
-                dismissButton = { TextButton(onClick = { collectionKey = null }) { Text("Close") } },
+                confirmButton = {
+                    if (creating) TextButton(onClick = {
+                        val n = newName.trim()
+                        if (n.isNotEmpty()) {
+                            collections.forEach { it.locationKeys.remove(key) }        // one collection per pin
+                            app.saveCollection(Collection(n, "📁").apply { locationKeys.add(key) })
+                            refresh(); collectionKey = null
+                        }
+                    }) { Text("Create") }
+                },
+                dismissButton = { TextButton(onClick = { if (creating) creating = false else collectionKey = null }) { Text(if (creating) "Back" else "Close") } },
             )
         }
         deleteKey?.let { key ->
@@ -590,6 +635,61 @@ class MainActivity : ComponentActivity() {
         savePinLatLng?.let { ll -> SavePinDialog(ll) }
         tripPinDraft?.let { d -> TripPinDialog(d) }
         shareTarget?.let { t -> ShareToGroupDialog(t) }
+        if (showLiveShareDialog) LiveShareDialog()
+        directionChoice?.let { (dest, name) ->
+            TripDirectionDialog(
+                name = name,
+                onTrip = {
+                    directionChoice = null
+                    currentTripGid?.let { gid ->
+                        Trip.setTripDest(gid, dest.latitude, dest.longitude, name, myUid, myTag) { err ->
+                            if (err != null) toast("Couldn't set trip direction: $err")
+                        }
+                    }
+                    beginDirections(dest, name, isTrip = true)
+                },
+                onMeOnly = { directionChoice = null; beginDirections(dest, name, isTrip = false) },
+                onDismiss = { directionChoice = null },
+            )
+        }
+        if (showTripRoster) {
+            AlertDialog(
+                onDismissRequest = { showTripRoster = false },
+                title = { Text("On the trip · ${tripMembers.size} here", fontWeight = FontWeight.Bold) },
+                text = {
+                    if (tripMembers.isEmpty()) {
+                        Text("No one is sharing their location right now.")
+                    } else {
+                        androidx.compose.foundation.layout.Column {
+                            tripMembers.forEach { mbr ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp),
+                                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                                    AvatarCircle(photo = mbr.photo, fallback = "@${mbr.tag}", size = 32.dp)
+                                    Text(if (mbr.uid == myUid) "@${mbr.tag} (you)" else "@${mbr.tag}",
+                                        fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showTripRoster = false }) { Text("Close") } },
+            )
+        }
+        incomingTripDest?.let { dest ->
+            IncomingTripDirectionDialog(
+                byLabel = "@${dest.byTag.ifEmpty { "someone" }}",
+                byPhoto = tripMembers.firstOrNull { it.uid == dest.by }?.photo ?: "",
+                destName = dest.name,
+                onJoin = {
+                    incomingTripDest = null
+                    beginDirections(LatLng(dest.lat, dest.lng), dest.name.ifEmpty { "Trip destination" }, isTrip = true)
+                },
+                onDismiss = {
+                    incomingTripDest = null
+                    currentTripGid?.let { Trip.endTripDestForMe(it, myUid) } // opting out counts as done so it can clear
+                },
+            )
+        }
     }
 
     @Composable
@@ -635,7 +735,11 @@ class MainActivity : ComponentActivity() {
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(20.dp)) {
                     Text(pin.name.ifEmpty { "Shared pin" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text("Shared by @${pin.fromTag}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 4.dp)) {
+                        AvatarCircle(photo = pin.fromPhoto, fallback = "@${pin.fromTag}", size = 22.dp)
+                        Text("Shared by @${pin.fromTag}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
                     if (pin.note.isNotEmpty()) Text("📝 ${pin.note}", fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 10.dp))
                     Spacer(Modifier.padding(top = 8.dp))
@@ -697,10 +801,15 @@ class MainActivity : ComponentActivity() {
                     list.isEmpty() -> Text("You're not in any groups yet.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     else -> Column {
                         list.forEach { g ->
-                            CollectionRow("${g.name}  ·  ${g.members.size} member${if (g.members.size == 1) "" else "s"}") {
+                            Row(Modifier.fillMaxWidth().clickable {
                                 Groups.sharePin(g.id, myUid, myTag, target.lat, target.lng, target.name, target.note, target.placeId)
                                 toast("Shared to ${g.name}")
                                 shareTarget = null
+                            }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AvatarCircle(photo = g.photo, fallback = g.name, size = 34.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("${g.name}  ·  ${g.members.size} member${if (g.members.size == 1) "" else "s"}",
+                                    fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                     }
@@ -711,34 +820,75 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Pick which groups to share your live location to (multi-select). Pre-checks current shares; empty = stop. */
+    @Composable
+    private fun LiveShareDialog() {
+        var groups by remember { mutableStateOf<List<Group>?>(null) }
+        val selected = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.groups?.let { addAll(it) } } }
+        LaunchedEffect(Unit) { Groups.fetchMyGroups(myUid) { groups = it } }
+        val active = liveShare?.active == true
+        val onSurface = MaterialTheme.colorScheme.onSurface
+        AlertDialog(
+            onDismissRequest = { showLiveShareDialog = false },
+            title = { Text(if (active) "Live location" else "Share live location") },
+            text = {
+                Column {
+                    Text("Shares your live location for 1 hour, or until you stop. Choose groups:",
+                        fontSize = 13.sp, color = onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(bottom = 10.dp))
+                    val list = groups
+                    when {
+                        list == null -> Text("Loading your groups…", color = onSurface.copy(alpha = 0.6f))
+                        list.isEmpty() -> Text("You're not in any groups yet.", color = onSurface.copy(alpha = 0.6f))
+                        else -> list.forEach { g ->
+                            val checked = g.id in selected
+                            Row(Modifier.fillMaxWidth().clickable { if (checked) selected.remove(g.id) else selected.add(g.id) }
+                                .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (checked) "☑" else "☐", fontSize = 18.sp, color = if (checked) Teal else onSurface.copy(alpha = 0.5f))
+                                Spacer(Modifier.width(10.dp))
+                                AvatarCircle(photo = g.photo, fallback = g.name, size = 34.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("${g.name}  ·  ${g.members.size} member${if (g.members.size == 1) "" else "s"}",
+                                    fontSize = 15.sp, color = onSurface)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { applyLiveShare(selected.toSet()) }) {
+                    Text(if (active) "Update" else "Share", color = Teal, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                if (active) TextButton(onClick = { showLiveShareDialog = false; LiveShare.stop(myUid) }) {
+                    Text("Stop sharing", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                } else TextButton(onClick = { showLiveShareDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     private fun saveTripPin(draft: TripPinDraft, name: String, note: String) {
         val gid = currentTripGid
         if (gid != null) {
-            if (draft.id == null) Trip.sharePin(gid, myUid, myTag, draft.lat, draft.lng, name, note)
+            if (draft.id == null) Trip.sharePin(gid, myUid, myTag, app.getUserPhoto(myUid), draft.lat, draft.lng, name, note)
             else Trip.updatePin(gid, draft.id, name, note) {}
         }
         tripPinDraft = null
     }
 
     private val sidebarActions = object : SidebarActions {
-        override fun onNewWaypoint() { drawerOpen = false; startWaypointPicker() }
-        override fun onShowWaypoints() { drawerOpen = false; startActivity(Intent(this@MainActivity, ShowSavedLocations::class.java)) }
-        override fun onSetAddress() { drawerOpen = false; startAddressPicker() }
+        override fun onCollections() { drawerOpen = false; startActivity(Intent(this@MainActivity, CollectionsActivity::class.java)) }
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, GroupsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
         override fun onTrackingChanged(enabled: Boolean) { stats.tracking = enabled; if (enabled) startLocationUpdates() else { applyHeadingMode(false); stopLocationUpdates() } }
-        override fun onGpsModeChanged(highAccuracy: Boolean) {
-            locReq = buildLocReq(if (highAccuracy) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY)
-        }
     }
 
     private val statsActions = object : StatsActions {
-        override fun onSave() { startWaypointPicker() }
         override fun onPin() { togglePinMode() }
-        override fun onShare() { shareLocation() }
+        override fun onShare() { showLiveShareDialog = true }
     }
 
     /* ── Map interaction ────────────────────────────────────────────────── */
@@ -802,7 +952,7 @@ class MainActivity : ComponentActivity() {
         val gid = currentTripGid
         if (gid != null) {
             // On a trip → this pin belongs to the shared session, not your personal storage.
-            Trip.sharePin(gid, myUid, myTag, ll.latitude, ll.longitude, name, notes)
+            Trip.sharePin(gid, myUid, myTag, app.getUserPhoto(myUid), ll.latitude, ll.longitude, name, notes)
         } else {
             val loc = Location("picked").apply { latitude = ll.latitude; longitude = ll.longitude }
             app.saveLocation(loc)
@@ -814,7 +964,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openCollection(key: String) {
-        if (app.collections.isEmpty()) { toast("No collections yet — create one in Saved Waypoints."); return }
         collectionKey = key
     }
 
@@ -867,11 +1016,12 @@ class MainActivity : ComponentActivity() {
     /** My participant doc changed (joined/left/switched groups) → (re)wire the live listeners. */
     private fun onMyTripChanged(gid: String?) {
         currentTripGid = gid
-        tripMembersListener?.remove(); tripPinsListener?.remove()
-        tripMembersListener = null; tripPinsListener = null
+        tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove()
+        tripMembersListener = null; tripPinsListener = null; tripDestListener = null
         refresh() // swap personal ↔ session pins on the map
         if (gid == null) {
             tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""
+            if (routeIsTrip) { routeIsTrip = false; clearDirections() } // left the trip → drop its shared direction
             googleMap?.let { tripLayer.clear() }
             return
         }
@@ -879,6 +1029,22 @@ class MainActivity : ComponentActivity() {
         Groups.fetchName(gid) { name -> tripGroupName = name; TripLocationService.start(this, myUid, name) }
         tripMembersListener = Trip.listenMembers(gid) { tripMembers = it; renderTrip() }
         tripPinsListener = Trip.listenPins(gid) { tripPins = it; renderTrip() }
+        tripDestListener = Trip.listenTripDest(gid) { onTripDestChanged(it) }
+    }
+
+    /** A shared trip destination appeared, changed, or ended → offer to join (or clear it). Never forced. */
+    private fun onTripDestChanged(dest: Trip.TripDest?) {
+        if (dest == null) {                       // everyone finished / not set → drop my copy of it
+            incomingTripDest = null
+            if (routeIsTrip) { routeIsTrip = false; clearDirections() }
+            return
+        }
+        val ll = LatLng(dest.lat, dest.lng)
+        if (routeIsTrip && routeDest == ll) { incomingTripDest = null; return } // already following this exact one
+        if (routeIsTrip) { routeIsTrip = false; clearDirections() }             // a replaced dest → drop the old shared route
+        if (myUid in dest.done) { incomingTripDest = null; return }             // I already ended/dismissed this one
+        if (dest.by == myUid) { beginDirections(ll, dest.name.ifEmpty { "Trip destination" }, isTrip = true); return } // I set it → follow my own
+        incomingTripDest = dest                    // someone else set it → prompt (Join / Dismiss)
     }
 
     private fun renderTrip() {
@@ -890,13 +1056,23 @@ class MainActivity : ComponentActivity() {
 
     private fun leaveTrip() {
         val uid = myUid
-        if (uid.isNotEmpty()) Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") }
+        val gid = currentTripGid
+        if (uid.isNotEmpty()) Trip.leave(uid) { err ->
+            if (err != null) toast("Couldn't leave: $err")
+            else gid?.let { Groups.postSystem(it, "👋 @$myTag left the trip") }
+        }
     }
 
     /* ── Directions ─────────────────────────────────────────────────────── */
 
     private fun startDirections(dest: LatLng, name: String) {
+        if (currentTripGid != null) { directionChoice = dest to name; return } // ask: share with trip, or just me?
+        beginDirections(dest, name, isTrip = false)
+    }
+
+    private fun beginDirections(dest: LatLng, name: String, isTrip: Boolean) {
         if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
+        routeIsTrip = isTrip
         routeDest = dest; routeDestName = name; travelMode = TravelMode.DRIVE
         fetchRouteAndShow()
     }
@@ -933,9 +1109,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun closeDirections() {
+        if (routeIsTrip) { endTripDirection(); return } // trip route: closing = ending it for me
+        clearDirections()
+    }
+
+    private fun clearDirections() {
         if (navigating) { navigating = false; tts?.stop(); exitNavLocationUpdates() }
         routeDest = null; routeDestName = ""; routes = emptyList(); routePoints = emptyList()
         routeLoading = false; currentStepIndex = 0; navDistanceToNext = 0
+    }
+
+    /** End the shared trip direction for me only (leaves it running for everyone else). */
+    private fun endTripDirection() {
+        val gid = currentTripGid
+        routeIsTrip = false
+        clearDirections()
+        if (gid != null) Trip.endTripDestForMe(gid, myUid)
     }
 
     /* ── Live turn-by-turn navigation ───────────────────────────────────── */
@@ -955,7 +1144,8 @@ class MainActivity : ComponentActivity() {
         navigating = false
         tts?.stop()
         exitNavLocationUpdates()
-        routes.getOrNull(selectedRouteIndex)?.let { fitToRoute(it.points) }
+        if (routeIsTrip) endTripDirection()   // exiting a shared trip route ends it for me
+        else routes.getOrNull(selectedRouteIndex)?.let { fitToRoute(it.points) }
     }
 
     /** Called from updateUIValues on each fix while navigating: reroute/re-time, follow, advance steps. */
@@ -988,7 +1178,10 @@ class MainActivity : ComponentActivity() {
         if (res[0] < 25f) { // reached this maneuver — advance & announce the next one
             currentStepIndex++
             if (currentStepIndex < steps.size) speak(steps[currentStepIndex].instruction)
-            else speak("You have arrived at your destination")
+            else {
+                speak("You have arrived at your destination")
+                if (routeIsTrip) endTripDirection() // arrival counts as done; clears trip-wide once all arrive
+            }
         }
     }
 
@@ -1109,6 +1302,8 @@ class MainActivity : ComponentActivity() {
         if (loc == null) return
         savedLat = loc.latitude; savedLng = loc.longitude
         app.lastLat = savedLat; app.lastLng = savedLng // trip publishing is owned by TripLocationService
+        // Live-share publishing (foreground): push each fix while a share is active; expiry handled in onLiveShareChanged.
+        liveShare?.let { if (it.active) LiveShare.updateLocation(myUid, savedLat, savedLng) }
         stats.lat = String.format("%.5f", savedLat)
         stats.lon = String.format("%.5f", savedLng)
         stats.accuracy = String.format("%.1fm", loc.accuracy)
@@ -1143,48 +1338,16 @@ class MainActivity : ComponentActivity() {
 
     /* ── Pickers & actions ──────────────────────────────────────────────── */
 
-    private fun startWaypointPicker() {
-        if (savedLat == 0.0 && savedLng == 0.0) return
-        waypointPicker.launch(Intent(this, MapPickerActivity::class.java).apply {
-            putExtra("latitude", savedLat); putExtra("longitude", savedLng); putExtra("mode", "waypoint")
-        })
-    }
-
-    private fun startAddressPicker() {
-        if (savedLat == 0.0 && savedLng == 0.0) return
-        addressPicker.launch(Intent(this, MapPickerActivity::class.java).apply {
-            putExtra("latitude", savedLat); putExtra("longitude", savedLng); putExtra("mode", "address")
-        })
-    }
-
-    private fun handleWaypointResult(data: Intent) {
-        val lat = data.getDoubleExtra("picked_lat", 0.0); val lng = data.getDoubleExtra("picked_lng", 0.0)
-        val name = data.getStringExtra("picked_name") ?: ""
-        val notes = data.getStringExtra("picked_notes") ?: ""
-        val gid = currentTripGid
-        if (gid != null) {
-            Trip.sharePin(gid, myUid, myTag, lat, lng, name, notes)
-        } else {
-            app.saveLocation(Location("picked").apply { latitude = lat; longitude = lng })
-            val key = App.locationKey(lat, lng)
-            if (name.isNotEmpty()) app.saveLocationName(key, name)
-            if (notes.isNotEmpty()) app.saveNote(key, notes)
+    /** Apply the live-share dialog's group selection: start/replace/stop and announce newly-added groups. */
+    private fun applyLiveShare(selected: Set<String>) {
+        showLiveShareDialog = false
+        val was = liveShare?.groups?.toSet() ?: emptySet()
+        if (selected.isEmpty()) { LiveShare.stop(myUid) { err -> if (err != null) toast("Couldn't stop: $err") }; return }
+        if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
+        LiveShare.start(myUid, myTag, app.getUserPhoto(myUid), selected.toList(), savedLat, savedLng) { err ->
+            if (err != null) { toast("Couldn't share: $err"); return@start }
+            (selected - was).forEach { gid -> Groups.postLiveShare(gid, myUid, myTag) } // announce only new groups
         }
-        refresh()
-    }
-
-    private fun handleAddressResult(data: Intent) {
-        val lat = data.getDoubleExtra("picked_lat", 0.0); val lng = data.getDoubleExtra("picked_lng", 0.0)
-        savedLat = lat; savedLng = lng; savedAddress = data.getStringExtra("picked_address") ?: ""
-        stats.address = savedAddress; stats.savedAddress = savedAddress
-        animateTo(LatLng(lat, lng), 18f)
-    }
-
-    private fun shareLocation() {
-        val address = savedAddress.ifEmpty { "Unknown address" }
-        val coords = String.format("%.6f, %.6f", savedLat, savedLng)
-        val text = "📍 $address\n🌐 Coordinates: $coords\n🗺️ Open in Maps: https://maps.google.com/?q=$savedLat,$savedLng"
-        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share Location via"))
     }
 
     private fun toggleTheme() {

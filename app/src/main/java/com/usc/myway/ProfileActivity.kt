@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +55,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
+private val TealDeep = Color(0xFF00A77D)
 
 /** Live screen state the activity pushes into the Composables. */
 private class ProfileState {
@@ -61,9 +64,11 @@ private class ProfileState {
     var last by mutableStateOf("")
     var tag by mutableStateOf("")
     var photo by mutableStateOf("")     // base64 JPEG, "" = none
+    var banner by mutableStateOf("")    // wide cover image (base64), "" = gradient fallback
     var savingName by mutableStateOf(false)
     var savingTag by mutableStateOf(false)
     var savingPhoto by mutableStateOf(false)
+    var savingBanner by mutableStateOf(false)
     var tagError by mutableStateOf<String?>(null)
     var toast by mutableStateOf<String?>(null)
 }
@@ -83,15 +88,20 @@ class ProfileActivity : ComponentActivity() {
                 (application as App).setUserPhoto(uid, p.photo) // keep the trip-icon cache warm
             }
         }
+        Profiles.fetchBanner(uid) { s.banner = it }
         setContent {
             MyWayTheme {
                 val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
                     if (uri != null) uploadPhoto(uri)
                 }
+                val pickBanner = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                    if (uri != null) uploadBanner(uri)
+                }
                 ProfileScreen(
                     s = s,
                     onBack = { finish() },
                     onPickPhoto = { pickImage.launch("image/*") },
+                    onPickBanner = { pickBanner.launch("image/*") },
                     onSaveName = ::saveName,
                     onSaveTag = ::saveTag,
                 )
@@ -140,6 +150,17 @@ class ProfileActivity : ComponentActivity() {
             } else s.toast = err
         }
     }
+
+    private fun uploadBanner(uri: Uri) {
+        s.savingBanner = true
+        // Wider than the avatar; still capped so the banner doc stays lean.
+        val b64 = try { encodeImage(contentResolver, uri, maxDim = 1024, quality = 65) } catch (_: Exception) { null }
+        if (b64 == null) { s.savingBanner = false; s.toast = "Couldn't read that image"; return }
+        Profiles.updateBanner(uid, b64) { err ->
+            s.savingBanner = false
+            if (err == null) { s.banner = b64; s.toast = "Banner updated" } else s.toast = err
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -148,6 +169,7 @@ private fun ProfileScreen(
     s: ProfileState,
     onBack: () -> Unit,
     onPickPhoto: () -> Unit,
+    onPickBanner: () -> Unit,
     onSaveName: () -> Unit,
     onSaveTag: (String) -> Unit,
 ) {
@@ -171,26 +193,48 @@ private fun ProfileScreen(
             return@Scaffold
         }
         Column(
-            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(24.dp),
+            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Avatar
-            val img = remember(s.photo) { decodeAvatar(s.photo) }
-            Box(
-                Modifier.size(120.dp).clip(CircleShape).background(Teal.copy(alpha = 0.15f)).clickable(onClick = onPickPhoto),
-                contentAlignment = Alignment.Center,
-            ) {
-                when {
-                    s.savingPhoto -> CircularProgressIndicator(color = Teal)
-                    img != null -> Image(img, contentDescription = "Profile photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else -> Text((s.tag.firstOrNull()?.uppercaseChar() ?: '?').toString(), fontSize = 48.sp, fontWeight = FontWeight.Bold, color = Teal)
+            // Banner (tap to change) with the avatar (tap to change) overlapping its lower-left, Discord-style.
+            val bannerImg = remember(s.banner) { decodeAvatar(s.banner) }
+            val avatarImg = remember(s.photo) { decodeAvatar(s.photo) }
+            val ring = MaterialTheme.colorScheme.surface
+            Box(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().height(140.dp).clickable(enabled = !s.savingBanner, onClick = onPickBanner),
+                    contentAlignment = Alignment.Center) {
+                    when {
+                        s.savingBanner -> CircularProgressIndicator(color = Color.White)
+                        bannerImg != null -> Image(bannerImg, contentDescription = "Banner", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else -> Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Teal, TealDeep))))
+                    }
+                }
+                Box(
+                    Modifier.align(Alignment.BottomStart).offset(x = 20.dp, y = 44.dp)
+                        .size(96.dp).clip(CircleShape).background(ring).padding(4.dp)
+                        .clip(CircleShape).background(Teal.copy(alpha = 0.15f)).clickable(enabled = !s.savingPhoto, onClick = onPickPhoto),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        s.savingPhoto -> CircularProgressIndicator(color = Teal)
+                        avatarImg != null -> Image(avatarImg, contentDescription = "Profile photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else -> Text((s.tag.firstOrNull()?.uppercaseChar() ?: '?').toString(), fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    }
                 }
             }
-            TextButton(onClick = onPickPhoto, enabled = !s.savingPhoto) {
-                Text(if (s.photo.isBlank()) "Add photo" else "Change photo", color = Teal)
+            Spacer(Modifier.height(52.dp))
+            Row(horizontalArrangement = Arrangement.Center) {
+                TextButton(onClick = onPickPhoto, enabled = !s.savingPhoto) {
+                    Text(if (s.photo.isBlank()) "Add photo" else "Change photo", color = Teal)
+                }
+                TextButton(onClick = onPickBanner, enabled = !s.savingBanner) {
+                    Text(if (s.banner.isBlank()) "Add banner" else "Change banner", color = Teal)
+                }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Column(Modifier.padding(horizontal = 24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+
+            Spacer(Modifier.height(4.dp))
 
             // Name
             SectionLabel("NAME")
@@ -240,6 +284,7 @@ private fun ProfileScreen(
                     Text(msg, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
             }
+            } // end padded content column
         }
     }
 }

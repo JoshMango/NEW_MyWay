@@ -1,62 +1,85 @@
 rules_version = '2';
-// MyWay Firestore security rules. Deploy from the Firebase console (Firestore → Rules)
-// or `firebase deploy --only firestore:rules`. Model notes live in the *.kt data files.
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    function mine(uid)  { return signedIn() && request.auth.uid == uid; }
-    function groupMembers(gid) {
-      return get(/databases/$(database)/documents/groups/$(gid)).data.members;
+    function member(gid) {
+      return signedIn() && request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.members;
     }
-    function inGroup(gid) { return signedIn() && request.auth.uid in groupMembers(gid); }
 
     // Profiles — anyone signed in can look up / search users; you write only your own doc.
     match /users/{uid} {
-      allow read: if signedIn();
-      allow write: if mine(uid);
+      allow read:  if signedIn();
+      allow write: if request.auth.uid == uid;
     }
 
-    // @tag uniqueness index. Claim/rename only points a handle at yourself; you can free your own.
-    match /usernames/{lower} {
+    // Profile banners — kept out of users/{uid} so friend search stays light. Read by anyone signed in
+    // (shown on profile cards); written only by the owner.
+    match /user_banners/{uid} {
+      allow read:  if signedIn();
+      allow write: if request.auth.uid == uid;
+    }
+
+    // @tag uniqueness index. A handle can only point at yourself; only its owner may change/release it.
+    match /usernames/{tagLower} {
       allow read:   if signedIn();
-      allow write:  if signedIn()
-                    && request.resource.data.uid == request.auth.uid
-                    && (resource == null || resource.data.uid == request.auth.uid);
-      allow delete: if resource.data.uid == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+                       && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
-    // Friend requests — sender creates; either party reads/deletes.
-    match /friendRequests/{id} {
-      allow create: if request.resource.data.from == request.auth.uid;
-      allow read, delete: if signedIn()
-                    && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
-    }
-
-    // Friendships — either member of the pair may create/read/delete.
-    match /friendships/{pair} {
-      allow create: if signedIn() && request.auth.uid in request.resource.data.users;
-      allow read, delete: if signedIn() && request.auth.uid in resource.data.users;
-    }
-
-    // Groups — members read; owner creates; members update (roster/photo/tripActive enforced client-side).
+    // Groups — members read; owner creates; members update (roles enforced in-app); owner deletes.
     match /groups/{gid} {
       allow read:   if signedIn() && request.auth.uid in resource.data.members;
-      allow create: if request.auth.uid == request.resource.data.owner;
+      allow create: if request.auth.uid == request.resource.data.owner
+                    && request.auth.uid in request.resource.data.members;
       allow update: if signedIn() && request.auth.uid in resource.data.members;
-      allow delete: if signedIn() && request.auth.uid == resource.data.owner;
+      allow delete: if request.auth.uid == resource.data.owner;
 
-      // Chat messages + shared trip pins — any group member.
-      match /messages/{mid}  { allow read, create: if inGroup(gid); }
-      match /trip_pins/{pid} { allow read, write: if inGroup(gid); }
+      // Chat — members post their own messages; system notices (trip join/left) post with from="system".
+      match /messages/{mid} {
+        allow read:   if member(gid);
+        allow create: if member(gid)
+                      && (request.resource.data.from == request.auth.uid
+                          || request.resource.data.get('system', false) == true);
+      }
+
+      // Shared trip pins — any member may add/edit/delete.
+      match /trip_pins/{pid} {
+        allow read:           if member(gid);
+        allow create:         if member(gid) && request.resource.data.from == request.auth.uid;
+        allow update, delete: if member(gid);
+      }
     }
 
     // Trip participation — ONE doc per user keyed by uid (single-trip-at-a-time).
     // You write only your own; any group member may delete a participant when ending the session.
     match /trip_participants/{uid} {
-      allow read: if signedIn();
-      allow create, update: if mine(uid);
-      allow delete: if mine(uid) || inGroup(resource.data.gid);
+      allow read:           if signedIn();
+      allow create, update: if request.auth.uid == uid;
+      allow delete:         if request.auth.uid == uid || member(resource.data.gid);
+    }
+
+    // Live location shares — ONE doc per user keyed by uid; you write only your own, anyone signed in can view.
+    match /live_shares/{uid} {
+      allow read:  if signedIn();
+      allow write: if request.auth.uid == uid;
+    }
+
+    // Friend requests — sender creates; either party reads/deletes.
+    match /friendRequests/{id} {
+      allow create:       if signedIn() && request.resource.data.from == request.auth.uid;
+      allow read, delete: if signedIn()
+                          && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+    }
+
+    // Friendships — either member of the pair may create/read/delete/update the edge.
+    match /friendships/{pairId} {
+      allow read, delete: if signedIn() && request.auth.uid in resource.data.users;
+      allow create:       if signedIn() && request.auth.uid in request.resource.data.users;
+      allow update:       if signedIn() && request.auth.uid in resource.data.users
+                             && request.auth.uid in request.resource.data.users;
     }
   }
 }
