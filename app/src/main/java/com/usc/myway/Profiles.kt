@@ -31,6 +31,35 @@ object Profiles {
             .addOnFailureListener { onResult(null) }
     }
 
+    data class Profile(val tag: String, val firstName: String, val lastName: String, val photo: String)
+
+    /** Full profile for the settings screen. null on network error. */
+    fun fetchProfile(uid: String, onResult: (Profile?) -> Unit) {
+        db.collection("users").document(uid).get()
+            .addOnSuccessListener {
+                onResult(Profile(
+                    tag = it.getString("tag") ?: "",
+                    firstName = it.getString("firstName") ?: "",
+                    lastName = it.getString("lastName") ?: "",
+                    photo = it.getString("photo") ?: "",
+                ))
+            }
+            .addOnFailureListener { onResult(null) }
+    }
+
+    fun updateName(uid: String, first: String, last: String, onDone: (String?) -> Unit) {
+        db.collection("users").document(uid)
+            .set(mapOf("firstName" to first.trim(), "lastName" to last.trim()), SetOptions.merge())
+            .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not save") }
+    }
+
+    /** photo = base64 JPEG (small avatar) stored inline in the user doc. "" clears it. */
+    fun updatePhoto(uid: String, base64: String, onDone: (String?) -> Unit) {
+        db.collection("users").document(uid)
+            .set(mapOf("photo" to base64), SetOptions.merge())
+            .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not save photo") }
+    }
+
     sealed interface ClaimResult {
         data class Success(val tag: String) : ClaimResult
         data object Taken : ClaimResult
@@ -39,21 +68,23 @@ object Profiles {
 
     /**
      * Atomically reserve [display]'s handle for [uid]. Idempotent if the tag is already yours,
-     * so re-running onboarding (e.g. after a reinstall with no local cache) is safe.
+     * so re-running onboarding (reinstall with no local cache) is safe. Also used for renames:
+     * frees the user's previous handle so they don't squat it. createdAt is set only on first claim.
      */
     fun claimTag(uid: String, display: String, onResult: (ClaimResult) -> Unit) {
         val lower = normalize(display)
         val nameRef = db.collection("usernames").document(lower)
         val userRef = db.collection("users").document(uid)
         db.runTransaction { txn ->
+            val userSnap = txn.get(userRef)                 // read before writes
+            val oldLower = userSnap.getString("tagLower")
             val owner = txn.get(nameRef).getString("uid")
             if (owner != null && owner != uid) throw TakenException()
             txn.set(nameRef, mapOf("uid" to uid))
-            txn.set(
-                userRef,
-                mapOf("tag" to display, "tagLower" to lower, "createdAt" to FieldValue.serverTimestamp()),
-                SetOptions.merge(),
-            )
+            if (oldLower != null && oldLower != lower) txn.delete(db.collection("usernames").document(oldLower))
+            val data = mutableMapOf<String, Any>("tag" to display, "tagLower" to lower)
+            if (!userSnap.exists()) data["createdAt"] = FieldValue.serverTimestamp()
+            txn.set(userRef, data, SetOptions.merge())
         }.addOnSuccessListener { onResult(ClaimResult.Success(display)) }
             .addOnFailureListener {
                 onResult(if (it is TakenException) ClaimResult.Taken else ClaimResult.Error(it.message ?: "Could not save your tag"))

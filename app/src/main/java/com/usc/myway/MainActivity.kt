@@ -527,6 +527,7 @@ class MainActivity : ComponentActivity() {
         override fun onNewWaypoint() { drawerOpen = false; startWaypointPicker() }
         override fun onShowWaypoints() { drawerOpen = false; startActivity(Intent(this@MainActivity, ShowSavedLocations::class.java)) }
         override fun onSetAddress() { drawerOpen = false; startAddressPicker() }
+        override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
