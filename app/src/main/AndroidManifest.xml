@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".App"
@@ -44,6 +47,13 @@
         <activity
             android:name=".GroupChatActivity"
             android:exported="false" />
+        <activity
+            android:name=".SharedPinActivity"
+            android:exported="false" />
+        <service
+            android:name=".TripLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <activity
             android:name=".RegisterActivity"
             android:exported="false" />

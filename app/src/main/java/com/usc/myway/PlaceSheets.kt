@@ -97,6 +97,7 @@ fun MarkerActionsSheet(
     onDirections: () -> Unit,
     onNote: () -> Unit,
     onCollection: () -> Unit,
+    onShareToGroup: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -116,6 +117,8 @@ fun MarkerActionsSheet(
                 Box(Modifier.weight(1f)) { SheetButton("✏️  Note", onSurface.copy(alpha = 0.06f), TealDeep, onNote) }
                 Box(Modifier.weight(1f)) { SheetButton("📁  Collection", onSurface.copy(alpha = 0.06f), TealDeep, onCollection) }
             }
+            Spacer(Modifier.height(10.dp))
+            SheetButton("📤  Share to group", onSurface.copy(alpha = 0.06f), TealDeep, onShareToGroup)
             Spacer(Modifier.height(10.dp))
             SheetButton("🗑️  Delete Location", Color(0xFFFEE2E2), Red, onDelete)
         }
@@ -493,7 +496,7 @@ private fun PhotoCard(meta: PhotoMetadata, placesClient: PlacesClient, cacheKey:
 private fun compactCount(n: Int): String =
     if (n < 1000) "$n reviews" else String.format("%.1fk reviews", n / 1000.0)
 
-private suspend fun geocodeLine(ctx: Context, ll: LatLng): String = withContext(Dispatchers.IO) {
+internal suspend fun geocodeLine(ctx: Context, ll: LatLng): String = withContext(Dispatchers.IO) {
     try {
         @Suppress("DEPRECATION")
         Geocoder(ctx).getFromLocation(ll.latitude, ll.longitude, 1)?.firstOrNull()?.getAddressLine(0) ?: ""
