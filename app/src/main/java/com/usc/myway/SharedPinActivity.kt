@@ -4,7 +4,6 @@ package com.usc.myway
 
 import android.content.Intent
 import android.location.Location
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,17 +66,19 @@ class SharedPinActivity : ComponentActivity() {
                 SharedPinScreen(
                     lat = lat, lng = lng, name = name, note = note,
                     onBack = { finish() },
-                    onOpenGoogle = { openGoogleMaps() },
+                    onViewOnMap = { viewOnMap() },
                     onAddToMap = { addToMap() },
                 )
             }
         }
     }
 
-    /** The location's Google Maps page (opens the Maps app or the web page). */
-    private fun openGoogleMaps() {
-        val uri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
-        startActivity(Intent(Intent.ACTION_VIEW, uri))
+    /** Open the shared spot on the app's own map. */
+    private fun viewOnMap() {
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            putExtra("focus_lat", lat); putExtra("focus_lng", lng)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        })
     }
 
     private fun addToMap() {
@@ -103,7 +104,7 @@ private fun SharedPinScreen(
     name: String,
     note: String,
     onBack: () -> Unit,
-    onOpenGoogle: () -> Unit,
+    onViewOnMap: () -> Unit,
     onAddToMap: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -140,9 +141,9 @@ private fun SharedPinScreen(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f), modifier = Modifier.padding(top = 6.dp))
 
                 Column(Modifier.fillMaxWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = onOpenGoogle, modifier = Modifier.fillMaxWidth().height(50.dp),
+                    OutlinedButton(onClick = onViewOnMap, modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(14.dp)) {
-                        Text("🌐  Open in Google Maps", color = TealDeep, fontWeight = FontWeight.Bold)
+                        Text("🗺️  View on map", color = TealDeep, fontWeight = FontWeight.Bold)
                     }
                     Button(
                         onClick = { onAddToMap(); added = true },

@@ -99,8 +99,8 @@ class GroupChatActivity : ComponentActivity() {
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
                     onJoinTrip = { joinTrip() },
-                    onLeaveTrip = { Trip.leave(uid) {} },
-                    onEndTrip = { Trip.endSession(gid) {} },
+                    onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") } },
+                    onEndTrip = { Trip.endSession(gid) { err -> if (err != null) toast("Couldn't end trip: $err") } },
                     onOpenPin = { m -> openSharedPin(m) },
                     actions = groupActions,
                 )
@@ -130,21 +130,33 @@ class GroupChatActivity : ComponentActivity() {
     private fun openSharedPin(m: GroupMessage) {
         val lat = m.pinLat ?: return
         val lng = m.pinLng ?: return
-        startActivity(Intent(this, SharedPinActivity::class.java).apply {
-            putExtra("lat", lat); putExtra("lng", lng)
-            putExtra("name", m.pinName); putExtra("note", m.pinNote)
-        })
+        if (m.pinPlaceId.isNotEmpty()) {
+            // A shared landmark → open its rich in-app place page on the map.
+            startActivity(Intent(this, MainActivity::class.java).apply {
+                putExtra("shared_placeId", m.pinPlaceId)
+                putExtra("shared_lat", lat); putExtra("shared_lng", lng); putExtra("shared_name", m.pinName)
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            })
+        } else {
+            startActivity(Intent(this, SharedPinActivity::class.java).apply {
+                putExtra("lat", lat); putExtra("lng", lng)
+                putExtra("name", m.pinName); putExtra("note", m.pinNote)
+            })
+        }
     }
 
     private fun joinTrip() {
         val appRef = application as App
-        // Any join implies an active session, so ensure it's marked ongoing, then go live.
-        Trip.startSession(gid) {
-            Trip.join(uid, gid, myTag, appRef.getUserPhoto(uid), appRef.lastLat, appRef.lastLng) {
-                TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
-            }
+        // Join is the critical write; surface any error so a denied write isn't silent.
+        Trip.join(uid, gid, myTag, appRef.getUserPhoto(uid), appRef.lastLat, appRef.lastLng) { err ->
+            if (err != null) toast("Couldn't join: $err")
+            else TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
         }
+        // Mark the session ongoing (best-effort; not needed if it's already active).
+        if (s.group?.tripActive != true) Trip.startSession(gid) { err -> if (err != null) toast("Couldn't mark live: $err") }
     }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
 
     private val groupActions = object : GroupActions {
         override fun onAddMember(f: UserHit) = Groups.addMember(gid, f) {}
@@ -205,7 +217,8 @@ private fun ChatScreen(
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
-            TripBar(g?.tripActive == true, s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
+            // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
+            if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
             MessageList(s.messages, myUid, onOpenPin, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
@@ -214,14 +227,14 @@ private fun ChatScreen(
     if (showInfo && g != null) {
         GroupInfoSheet(
             g = g, myUid = myUid, messages = s.messages, friends = s.friends,
-            onDismiss = { showInfo = false }, actions = actions,
+            onDismiss = { showInfo = false }, onStartTrip = onJoinTrip, actions = actions,
         )
     }
 }
 
+/** Ongoing-trip banner (rendered only while a trip is active) — Join/Leave + End, like an iPhone call bar. */
 @Composable
 private fun TripBar(
-    active: Boolean,
     members: List<Trip.Member>,
     myUid: String,
     onJoin: () -> Unit,
@@ -234,30 +247,21 @@ private fun TripBar(
         Modifier.fillMaxWidth().background(Teal.copy(alpha = 0.10f)).padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (active) "🔴" else "📍", fontSize = 14.sp)
+        Text("🔴", fontSize = 14.sp)
         Spacer(Modifier.width(8.dp))
         Text(
-            when {
-                !active -> "Start a Trip — share your live location"
-                members.isEmpty() -> "Trip ongoing · nobody sharing yet"
-                else -> "Trip ongoing · ${members.size} sharing location"
-            },
+            if (members.isEmpty()) "Trip ongoing · nobody sharing yet" else "Trip ongoing · ${members.size} sharing location",
             modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        if (!active) {
-            Button(onClick = onJoin, shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text("Go Live", fontWeight = FontWeight.Bold) }
+        if (iAmLive) {
+            Button(onClick = onLeave, shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Danger)) { Text("Leave", fontWeight = FontWeight.Bold) }
         } else {
-            if (iAmLive) {
-                Button(onClick = onLeave, shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Danger)) { Text("Leave", fontWeight = FontWeight.Bold) }
-            } else {
-                Button(onClick = onJoin, shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text("Join", fontWeight = FontWeight.Bold) }
-            }
-            TextButton(onClick = { confirmEnd = true }) { Text("End", color = Danger, fontWeight = FontWeight.Bold) }
+            Button(onClick = onJoin, shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text("Join", fontWeight = FontWeight.Bold) }
         }
+        TextButton(onClick = { confirmEnd = true }) { Text("End", color = Danger, fontWeight = FontWeight.Bold) }
     }
 
     if (confirmEnd) {
@@ -359,6 +363,7 @@ private fun GroupInfoSheet(
     messages: List<GroupMessage>,
     friends: List<UserHit>,
     onDismiss: () -> Unit,
+    onStartTrip: () -> Unit,
     actions: GroupActions,
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -386,6 +391,22 @@ private fun GroupInfoSheet(
                     Text(g.name, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(16.dp))
                 }
+            }
+
+            // Trip: start it here; once ongoing, Join/Leave/End live in the chat banner.
+            item {
+                if (!g.tripActive) {
+                    Button(
+                        onClick = { onStartTrip(); onDismiss() },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                    ) { Text("🔴  Start Trip", fontWeight = FontWeight.Bold) }
+                } else {
+                    Text("🔴 Trip in progress — join or end it from the chat.",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                }
+                Spacer(Modifier.height(16.dp))
             }
 
             // Recent images.

@@ -109,15 +109,15 @@ private val Teal = Color(0xFF00C99D)
 
 private sealed interface ActiveSheet {
     data class PinActions(val key: String, val title: String, val latLng: LatLng) : ActiveSheet
-    data class PlaceDetails(val place: Place, val name: String, val latLng: LatLng) : ActiveSheet
+    data class PlaceDetails(val place: Place, val name: String, val latLng: LatLng, val fromShare: Boolean = false) : ActiveSheet
     data class TripPinActions(val pin: Trip.TripPin) : ActiveSheet
 }
 
 // A session pin being created (id == null) or edited (id != null).
 private data class TripPinDraft(val id: String?, val lat: Double, val lng: Double, val name: String, val note: String)
 
-// A personal pin the user is sharing into a group's chat.
-private data class ShareTarget(val lat: Double, val lng: Double, val name: String, val note: String)
+// A personal pin the user is sharing into a group's chat. placeId set for landmarks.
+private data class ShareTarget(val lat: Double, val lng: Double, val name: String, val note: String, val placeId: String)
 
 class MainActivity : ComponentActivity() {
 
@@ -253,6 +253,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         refresh()
         handleFocusIntent(intent)
+        handleSharedPlaceIntent(intent)
         if (headingMode) sensorManager?.registerListener(orientationListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
     }
 
@@ -265,6 +266,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleFocusIntent(intent)
+        handleSharedPlaceIntent(intent)
     }
 
     override fun onDestroy() {
@@ -491,7 +493,8 @@ class MainActivity : ComponentActivity() {
                 onCollection = { activeSheet = null; openCollection(s.key) },
                 onShareToGroup = {
                     activeSheet = null
-                    shareTarget = ShareTarget(s.latLng.latitude, s.latLng.longitude, s.title, app.locationNotes[s.key] ?: "")
+                    shareTarget = ShareTarget(s.latLng.latitude, s.latLng.longitude, s.title,
+                        app.locationNotes[s.key] ?: "", app.getLocationPlaceId(s.key))
                 },
                 onDelete = { activeSheet = null; deleteKey = s.key },
             )
@@ -516,6 +519,13 @@ class MainActivity : ComponentActivity() {
                         if (inTrip) toast("Collections aren't available during a trip")
                         else { ensureSaved(s.latLng, s.name, s.place.id); openCollection(key) }
                     },
+                    onShareToGroup = {
+                        activeSheet = null
+                        shareTarget = ShareTarget(s.latLng.latitude, s.latLng.longitude, s.name,
+                            app.locationNotes[key] ?: "", s.place.id ?: "")
+                    },
+                    canAddToMap = s.fromShare,
+                    onAddToMap = { activeSheet = null; ensureSaved(s.latLng, s.name, s.place.id) },
                     onDelete = { activeSheet = null; deleteKey = key },
                 )
             }
@@ -688,7 +698,7 @@ class MainActivity : ComponentActivity() {
                     else -> Column {
                         list.forEach { g ->
                             CollectionRow("${g.name}  ·  ${g.members.size} member${if (g.members.size == 1) "" else "s"}") {
-                                Groups.sharePin(g.id, myUid, myTag, target.lat, target.lng, target.name, target.note)
+                                Groups.sharePin(g.id, myUid, myTag, target.lat, target.lng, target.name, target.note, target.placeId)
                                 toast("Shared to ${g.name}")
                                 shareTarget = null
                             }
@@ -755,8 +765,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun fetchAndShowPlace(placeId: String, name: String, latlng: LatLng) {
-        placeCache[placeId]?.let { showPlaceSheet(it, name, latlng); return }
+    private fun fetchAndShowPlace(placeId: String, name: String, latlng: LatLng, fromShare: Boolean = false) {
+        placeCache[placeId]?.let { showPlaceSheet(it, name, latlng, fromShare); return }
         val fields = listOf(
             Place.Field.ID, Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG,
             Place.Field.RATING, Place.Field.USER_RATINGS_TOTAL, Place.Field.PRICE_LEVEL,
@@ -765,14 +775,14 @@ class MainActivity : ComponentActivity() {
             Place.Field.REVIEWS, Place.Field.PHOTO_METADATAS,
         )
         placesClient.fetchPlace(FetchPlaceRequest.newInstance(placeId, fields))
-            .addOnSuccessListener { resp -> placeCache[placeId] = resp.place; showPlaceSheet(resp.place, name, latlng) }
+            .addOnSuccessListener { resp -> placeCache[placeId] = resp.place; showPlaceSheet(resp.place, name, latlng, fromShare) }
             .addOnFailureListener { toast("Couldn't load place details.") }
     }
 
     // Anchor the sheet on the place's canonical LatLng so the note key matches what's stored
     // (a POI tap gives the click point, which differs slightly from the establishment coords).
-    private fun showPlaceSheet(place: Place, name: String, fallback: LatLng) {
-        activeSheet = ActiveSheet.PlaceDetails(place, name, place.latLng ?: fallback)
+    private fun showPlaceSheet(place: Place, name: String, fallback: LatLng, fromShare: Boolean = false) {
+        activeSheet = ActiveSheet.PlaceDetails(place, name, place.latLng ?: fallback, fromShare)
     }
 
     private fun onPinMapClick(ll: LatLng) {
@@ -836,6 +846,16 @@ class MainActivity : ComponentActivity() {
         if (lat != 0.0 && lng != 0.0) animateTo(LatLng(lat, lng), 18f)
     }
 
+    /** A shared landmark tapped in a group chat → open its in-app place page here. */
+    private fun handleSharedPlaceIntent(intent: Intent?) {
+        val placeId = intent?.getStringExtra("shared_placeId")
+        if (placeId.isNullOrEmpty()) return
+        intent.removeExtra("shared_placeId") // consume so it doesn't refire on the next resume
+        val ll = LatLng(intent.getDoubleExtra("shared_lat", 0.0), intent.getDoubleExtra("shared_lng", 0.0))
+        animateTo(ll, 17f)
+        fetchAndShowPlace(placeId, intent.getStringExtra("shared_name") ?: "", ll, fromShare = true)
+    }
+
     /* ── Group Trip (live location + shared pins) ───────────────────────── */
 
     /** Render the map's pin layer: personal pins when free, session pins + members while on a trip. */
@@ -870,7 +890,7 @@ class MainActivity : ComponentActivity() {
 
     private fun leaveTrip() {
         val uid = myUid
-        if (uid.isNotEmpty()) Trip.leave(uid) {}
+        if (uid.isNotEmpty()) Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") }
     }
 
     /* ── Directions ─────────────────────────────────────────────────────── */
