@@ -135,7 +135,7 @@ private fun GroupsScreen(
                 Modifier.fillMaxSize().padding(pad).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(s.groups, key = { it.id }) { g -> GroupCard(g, onOpen) }
+                items(s.groups, key = { it.id }) { g -> GroupCard(g, g.tripActive, onOpen) }
             }
         }
     }
@@ -151,7 +151,7 @@ private fun GroupsScreen(
 }
 
 @Composable
-private fun GroupCard(g: Group, onOpen: (Group) -> Unit) {
+private fun GroupCard(g: Group, live: Boolean, onOpen: (Group) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
@@ -161,7 +161,17 @@ private fun GroupCard(g: Group, onOpen: (Group) -> Unit) {
         AvatarCircle(photo = g.photo, fallback = g.name, size = 46.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(g.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(g.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                if (live) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFEF4444))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) { Text("● LIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                }
+            }
             Text("${g.members.size} member${if (g.members.size == 1) "" else "s"}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }

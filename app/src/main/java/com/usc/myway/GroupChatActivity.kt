@@ -3,6 +3,7 @@
 // Members can send text and images. Live via Firestore snapshot listeners.
 package com.usc.myway
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -75,6 +76,7 @@ private class ChatState {
     var group by mutableStateOf<Group?>(null)
     var messages by mutableStateOf<List<GroupMessage>>(emptyList())
     var friends by mutableStateOf<List<UserHit>>(emptyList())
+    var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
 }
 
 class GroupChatActivity : ComponentActivity() {
@@ -96,6 +98,10 @@ class GroupChatActivity : ComponentActivity() {
                     onBack = { finish() },
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
+                    onJoinTrip = { joinTrip() },
+                    onLeaveTrip = { Trip.leave(uid) {} },
+                    onEndTrip = { Trip.endSession(gid) {} },
+                    onOpenPin = { m -> openSharedPin(m) },
                     actions = groupActions,
                 )
             }
@@ -106,6 +112,7 @@ class GroupChatActivity : ComponentActivity() {
         super.onStart()
         listeners += Groups.listenMessages(gid) { s.messages = it }
         listeners += Friends.listenFriends(uid) { s.friends = it }
+        listeners += Trip.listenMembers(gid) { s.tripMembers = it }
         listeners += Groups.listenGroup(gid) { g ->
             // Group deleted, or I'm no longer a member → close the screen.
             if (g == null || uid !in g.members) finish() else s.group = g
@@ -119,6 +126,25 @@ class GroupChatActivity : ComponentActivity() {
 
     private fun encode(uri: Uri, maxDim: Int, quality: Int): String? =
         try { encodeImage(contentResolver, uri, maxDim, quality) } catch (_: Exception) { null }
+
+    private fun openSharedPin(m: GroupMessage) {
+        val lat = m.pinLat ?: return
+        val lng = m.pinLng ?: return
+        startActivity(Intent(this, SharedPinActivity::class.java).apply {
+            putExtra("lat", lat); putExtra("lng", lng)
+            putExtra("name", m.pinName); putExtra("note", m.pinNote)
+        })
+    }
+
+    private fun joinTrip() {
+        val appRef = application as App
+        // Any join implies an active session, so ensure it's marked ongoing, then go live.
+        Trip.startSession(gid) {
+            Trip.join(uid, gid, myTag, appRef.getUserPhoto(uid), appRef.lastLat, appRef.lastLng) {
+                TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
+            }
+        }
+    }
 
     private val groupActions = object : GroupActions {
         override fun onAddMember(f: UserHit) = Groups.addMember(gid, f) {}
@@ -151,6 +177,10 @@ private fun ChatScreen(
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onSendImage: (Uri) -> Unit,
+    onJoinTrip: () -> Unit,
+    onLeaveTrip: () -> Unit,
+    onEndTrip: () -> Unit,
+    onOpenPin: (GroupMessage) -> Unit,
     actions: GroupActions,
 ) {
     var showInfo by remember { mutableStateOf(false) }
@@ -175,7 +205,8 @@ private fun ChatScreen(
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
-            MessageList(s.messages, myUid, Modifier.weight(1f))
+            TripBar(g?.tripActive == true, s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
+            MessageList(s.messages, myUid, onOpenPin, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
     }
@@ -189,7 +220,61 @@ private fun ChatScreen(
 }
 
 @Composable
-private fun MessageList(messages: List<GroupMessage>, myUid: String, modifier: Modifier) {
+private fun TripBar(
+    active: Boolean,
+    members: List<Trip.Member>,
+    myUid: String,
+    onJoin: () -> Unit,
+    onLeave: () -> Unit,
+    onEnd: () -> Unit,
+) {
+    val iAmLive = members.any { it.uid == myUid }
+    var confirmEnd by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().background(Teal.copy(alpha = 0.10f)).padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (active) "🔴" else "📍", fontSize = 14.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                !active -> "Start a Trip — share your live location"
+                members.isEmpty() -> "Trip ongoing · nobody sharing yet"
+                else -> "Trip ongoing · ${members.size} sharing location"
+            },
+            modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (!active) {
+            Button(onClick = onJoin, shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text("Go Live", fontWeight = FontWeight.Bold) }
+        } else {
+            if (iAmLive) {
+                Button(onClick = onLeave, shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Danger)) { Text("Leave", fontWeight = FontWeight.Bold) }
+            } else {
+                Button(onClick = onJoin, shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text("Join", fontWeight = FontWeight.Bold) }
+            }
+            TextButton(onClick = { confirmEnd = true }) { Text("End", color = Danger, fontWeight = FontWeight.Bold) }
+        }
+    }
+
+    if (confirmEnd) {
+        AlertDialog(
+            onDismissRequest = { confirmEnd = false },
+            title = { Text("End trip?", fontWeight = FontWeight.Bold) },
+            text = { Text("This ends the trip for everyone and deletes all shared pins and notes from the session. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = { confirmEnd = false; onEnd() }) { Text("End trip", color = Danger, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: (GroupMessage) -> Unit, modifier: Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -202,29 +287,40 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String, modifier: M
     }
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 12.dp), state = listState,
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(messages, key = { it.id }) { m -> MessageBubble(m, mine = m.from == myUid) }
+        items(messages, key = { it.id }) { m -> MessageBubble(m, mine = m.from == myUid, onOpenPin) }
     }
 }
 
 @Composable
-private fun MessageBubble(m: GroupMessage, mine: Boolean) {
+private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessage) -> Unit) {
+    val isPin = m.pinLat != null && m.pinLng != null
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
                 .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
+                .then(if (isPin) Modifier.clickable { onOpenPin(m) } else Modifier)
                 .padding(horizontal = if (m.image.isNotEmpty()) 4.dp else 12.dp, vertical = if (m.image.isNotEmpty()) 4.dp else 8.dp),
         ) {
             if (!mine) Text("@${m.fromTag}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep,
                 modifier = Modifier.padding(horizontal = if (m.image.isNotEmpty()) 8.dp else 0.dp))
-            if (m.image.isNotEmpty()) {
-                val img = remember(m.image) { decodeAvatar(m.image) }
-                if (img != null) {
-                    Image(img, contentDescription = "Shared image", contentScale = ContentScale.Fit,
-                        modifier = Modifier.widthIn(max = 240.dp).heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)))
+            when {
+                isPin -> {
+                    val onCard = if (mine) Color.White else MaterialTheme.colorScheme.onSurface
+                    Text("📍 ${m.pinName.ifEmpty { "Shared location" }}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
+                    if (m.pinNote.isNotEmpty()) Text("📝 ${m.pinNote}", fontSize = 13.sp, color = onCard.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(top = 2.dp))
+                    Text("Tap to view on map", fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (mine) Color.White.copy(alpha = 0.85f) else TealDeep, modifier = Modifier.padding(top = 6.dp))
                 }
-            } else {
-                Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                m.image.isNotEmpty() -> {
+                    val img = remember(m.image) { decodeAvatar(m.image) }
+                    if (img != null) {
+                        Image(img, contentDescription = "Shared image", contentScale = ContentScale.Fit,
+                            modifier = Modifier.widthIn(max = 240.dp).heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)))
+                    }
+                }
+                else -> Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
             }
         }
     }

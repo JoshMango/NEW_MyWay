@@ -32,6 +32,15 @@ class App : Application() {
     fun getUserTag(uid: String): String = prefs().getString(KEY_USER_TAG + uid, "") ?: ""
     fun setUserTag(uid: String, tag: String) { prefs().edit().putString(KEY_USER_TAG + uid, tag).apply() }
 
+    // ── User avatar cache (base64) — used as the live-trip map icon without a Firestore read. ──
+    fun getUserPhoto(uid: String): String = prefs().getString(KEY_USER_PHOTO + uid, "") ?: ""
+    fun setUserPhoto(uid: String, photo: String) { prefs().edit().putString(KEY_USER_PHOTO + uid, photo).apply() }
+
+    // ── Last known location (in-memory) — MainActivity keeps this fresh so other screens (e.g. joining
+    //    a trip from the group chat) can seed a location without their own GPS fix. ──
+    @Volatile var lastLat: Double = 0.0
+    @Volatile var lastLng: Double = 0.0
+
     // ── Locations ──────────────────────────────────────────────────────────────
     fun saveLocation(loc: Location) { myLocations.add(loc); saveLocationsToPrefs() }
 
@@ -178,6 +187,7 @@ class App : Application() {
         private const val KEY_COLLECTION_KEYS = "collection_keys_"
         private const val KEY_DARK_MODE = "dark_mode"
         private const val KEY_USER_TAG = "usertag_"
+        private const val KEY_USER_PHOTO = "userphoto_"
 
         // Key helper — must be consistent everywhere.
         @JvmStatic

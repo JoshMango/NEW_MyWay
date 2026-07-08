@@ -18,13 +18,24 @@ data class Group(
     val admins: List<String>,
     val tags: Map<String, String>,
     val photo: String = "",
+    val tripActive: Boolean = false,   // an ongoing trip session (joinable, marked LIVE) — survives everyone leaving
 ) {
     fun isAdmin(uid: String) = uid == owner || uid in admins
     fun tagOf(uid: String) = tags[uid] ?: "unknown"
 }
 
-/** A chat message is either text or an image (base64 JPEG). */
-data class GroupMessage(val id: String, val from: String, val fromTag: String, val text: String, val image: String = "")
+/** A chat message: text, an image (base64 JPEG), or a shared location pin (pinLat != null). */
+data class GroupMessage(
+    val id: String,
+    val from: String,
+    val fromTag: String,
+    val text: String,
+    val image: String = "",
+    val pinLat: Double? = null,
+    val pinLng: Double? = null,
+    val pinName: String = "",
+    val pinNote: String = "",
+)
 
 object Groups {
 
@@ -45,12 +56,26 @@ object Groups {
         ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not create group") }
     }
 
+    /** One-shot list of groups I'm in (for the share-to-group picker). */
+    fun fetchMyGroups(uid: String, onResult: (List<Group>) -> Unit) {
+        db.collection("groups").whereArrayContains("members", uid).get()
+            .addOnSuccessListener { snap -> onResult(snap.documents.mapNotNull { mapGroup(it.id, it) }) }
+            .addOnFailureListener { onResult(emptyList()) }
+    }
+
     /** Groups I'm in. */
     fun listenMyGroups(uid: String, onChange: (List<Group>) -> Unit): ListenerRegistration =
         db.collection("groups").whereArrayContains("members", uid)
             .addSnapshotListener { snap, _ ->
                 if (snap != null) onChange(snap.documents.mapNotNull { mapGroup(it.id, it) })
             }
+
+    /** One-shot group name lookup. */
+    fun fetchName(gid: String, onResult: (String) -> Unit) {
+        db.collection("groups").document(gid).get()
+            .addOnSuccessListener { onResult(it.getString("name") ?: "Group") }
+            .addOnFailureListener { onResult("Group") }
+    }
 
     /** Live single group doc — drives the roster/role UI. onChange(null) if it's gone (deleted/kicked). */
     fun listenGroup(gid: String, onChange: (Group?) -> Unit): ListenerRegistration =
@@ -68,6 +93,7 @@ object Groups {
             admins = (d.get("admins") as? List<String>) ?: emptyList(),
             tags = (d.get("tags") as? Map<String, String>) ?: emptyMap(),
             photo = d.getString("photo") ?: "",
+            tripActive = d.getBoolean("tripActive") ?: false,
         )
     }
 
@@ -84,7 +110,9 @@ object Groups {
             .addSnapshotListener { snap, _ ->
                 if (snap != null) onChange(snap.documents.map {
                     GroupMessage(it.id, it.getString("from") ?: "", it.getString("fromTag") ?: "",
-                        it.getString("text") ?: "", it.getString("image") ?: "")
+                        it.getString("text") ?: "", it.getString("image") ?: "",
+                        it.getDouble("pinLat"), it.getDouble("pinLng"),
+                        it.getString("pinName") ?: "", it.getString("pinNote") ?: "")
                 })
             }
 
@@ -97,6 +125,14 @@ object Groups {
     fun sendImage(gid: String, fromUid: String, fromTag: String, base64: String) {
         if (base64.isEmpty()) return
         post(gid, mapOf("from" to fromUid, "fromTag" to fromTag, "text" to "", "image" to base64))
+    }
+
+    /** Share a personal pin/note into a group's chat as a tappable location card. */
+    fun sharePin(gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String) {
+        post(gid, mapOf(
+            "from" to fromUid, "fromTag" to fromTag, "text" to "",
+            "pinLat" to lat, "pinLng" to lng, "pinName" to name, "pinNote" to note,
+        ))
     }
 
     private fun post(gid: String, fields: Map<String, Any>) {

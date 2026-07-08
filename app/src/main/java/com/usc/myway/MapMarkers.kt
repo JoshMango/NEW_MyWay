@@ -56,6 +56,14 @@ class MapMarkerManager(private val context: Context) {
 
     fun pinForKey(key: String): Marker? = markerKeys.entries.firstOrNull { it.value == key }?.key
 
+    /** Remove all personal markers (used when a trip takes over the map). */
+    fun clear() {
+        markerKeys.keys.forEach { it.remove() }
+        labelKeys.keys.forEach { it.remove() }
+        markerKeys.clear(); labelKeys.clear(); noteFullIcons.clear()
+        notesCollapsed = null
+    }
+
     private fun addPinNoteLabel(map: GoogleMap, pos: LatLng, title: String, note: String, key: String) {
         val full = buildLabelBitmap(context, title, note, 0f, dark)
         // Billboard (not flat): stays upright/readable as the map rotates, like Google's labels.
@@ -94,9 +102,13 @@ class MapMarkerManager(private val context: Context) {
 
     companion object {
         private const val LABEL_ZOOM = 18f
+    }
+}
 
-        /** Small circle with a pencil — the collapsed state of a note. */
-        private fun buildPencilBitmap(ctx: Context, dark: Boolean): BitmapDescriptor {
+/* Note bitmaps — top-level so both MapMarkerManager (personal) and TripLayer (session) render identical labels. */
+
+/** Small circle with a pencil — the collapsed state of a note. */
+internal fun buildPencilBitmap(ctx: Context, dark: Boolean): BitmapDescriptor {
             val d = ctx.resources.displayMetrics.density
             val size = (32 * d).toInt()
             val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -113,9 +125,9 @@ class MapMarkerManager(private val context: Context) {
             return BitmapDescriptorFactory.fromBitmap(bmp)
         }
 
-        /** Modern rounded note card: white pill, soft shadow, dark title, teal note. topPad reserves
-         *  transparent space above the card so an anchor(0.5,0) marker sits below the map point. */
-        private fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean): BitmapDescriptor {
+/** Modern rounded note card: white pill, soft shadow, dark title, teal note. topPad reserves
+ *  transparent space above the card so an anchor(0.5,0) marker sits below the map point. */
+internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean): BitmapDescriptor {
             val d = ctx.resources.displayMetrics.density
             val padH = 12 * d; val padV = 9 * d; val lineGap = 4 * d; val shadow = 6 * d; val radius = 12 * d
             val hasTitle = title.isNotEmpty()
@@ -155,7 +167,5 @@ class MapMarkerManager(private val context: Context) {
                 top += titleH + gap
             }
             if (hasNote) c.drawText(noteText, x, top - nm.ascent, np)
-            return BitmapDescriptorFactory.fromBitmap(bmp)
-        }
-    }
+    return BitmapDescriptorFactory.fromBitmap(bmp)
 }

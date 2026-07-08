@@ -78,7 +78,10 @@ class ProfileActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Profiles.fetchProfile(uid) { p ->
             s.loading = false
-            if (p != null) { s.first = p.firstName; s.last = p.lastName; s.tag = p.tag; s.photo = p.photo }
+            if (p != null) {
+                s.first = p.firstName; s.last = p.lastName; s.tag = p.tag; s.photo = p.photo
+                (application as App).setUserPhoto(uid, p.photo) // keep the trip-icon cache warm
+            }
         }
         setContent {
             MyWayTheme {
@@ -131,7 +134,10 @@ class ProfileActivity : ComponentActivity() {
         if (b64 == null) { s.savingPhoto = false; s.toast = "Couldn't read that image"; return }
         Profiles.updatePhoto(uid, b64) { err ->
             s.savingPhoto = false
-            if (err == null) { s.photo = b64; s.toast = "Photo updated" } else s.toast = err
+            if (err == null) {
+                s.photo = b64; s.toast = "Photo updated"
+                (application as App).setUserPhoto(uid, b64)
+            } else s.toast = err
         }
     }
 }
