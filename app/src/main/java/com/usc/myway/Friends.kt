@@ -10,7 +10,15 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 
-data class UserHit(val uid: String, val tag: String)
+data class UserHit(
+    val uid: String,
+    val tag: String,
+    val firstName: String = "",
+    val lastName: String = "",
+    val photo: String = "",
+) {
+    val fullName: String get() = "$firstName $lastName".trim()
+}
 
 data class FriendRequest(
     val id: String,
@@ -34,7 +42,12 @@ object Friends {
             .addOnSuccessListener { snap ->
                 onResult(snap.documents.mapNotNull { d ->
                     val tag = d.getString("tag") ?: return@mapNotNull null
-                    if (d.id == myUid) null else UserHit(d.id, tag)
+                    if (d.id == myUid) null else UserHit(
+                        uid = d.id, tag = tag,
+                        firstName = d.getString("firstName") ?: "",
+                        lastName = d.getString("lastName") ?: "",
+                        photo = d.getString("photo") ?: "",
+                    )
                 })
             }
             .addOnFailureListener { onResult(emptyList()) }

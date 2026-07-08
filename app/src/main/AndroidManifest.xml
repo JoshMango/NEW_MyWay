@@ -39,6 +39,12 @@
             android:name=".FriendsActivity"
             android:exported="false" />
         <activity
+            android:name=".GroupsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GroupChatActivity"
+            android:exported="false" />
+        <activity
             android:name=".RegisterActivity"
             android:exported="false" />
         <activity

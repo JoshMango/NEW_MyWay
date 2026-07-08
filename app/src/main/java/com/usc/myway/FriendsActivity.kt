@@ -279,12 +279,15 @@ private fun UserRow(hit: UserHit, trailing: @Composable () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(Teal.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-            Text(hit.tag.take(1).uppercase(), fontWeight = FontWeight.Bold, color = TealDeep, fontSize = 16.sp)
-        }
+        AvatarCircle(photo = hit.photo, fallback = hit.tag)
         Spacer(Modifier.width(12.dp))
-        Text("@${hit.tag}", Modifier.weight(1f), fontWeight = FontWeight.Medium, fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface)
+        Column(Modifier.weight(1f)) {
+            Text("@${hit.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface)
+            if (hit.fullName.isNotBlank()) {
+                Text(hit.fullName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
+        }
         trailing()
     }
 }
