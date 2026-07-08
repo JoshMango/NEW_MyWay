@@ -3,11 +3,8 @@
 // in the user's Firestore doc (users/{uid}.photo) — no Firebase Storage bucket/dependency.
 package com.usc.myway
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -48,15 +45,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.usc.myway.ui.theme.MyWayTheme
-import java.io.ByteArrayOutputStream
-import kotlin.math.max
 
 private val Teal = Color(0xFF00C99D)
 
@@ -133,33 +127,14 @@ class ProfileActivity : ComponentActivity() {
 
     private fun uploadPhoto(uri: Uri) {
         s.savingPhoto = true
-        val b64 = try { encodeAvatar(uri) } catch (_: Exception) { null }
+        val b64 = try { encodeImage(contentResolver, uri, maxDim = 256, quality = 80) } catch (_: Exception) { null }
         if (b64 == null) { s.savingPhoto = false; s.toast = "Couldn't read that image"; return }
         Profiles.updatePhoto(uid, b64) { err ->
             s.savingPhoto = false
             if (err == null) { s.photo = b64; s.toast = "Photo updated" } else s.toast = err
         }
     }
-
-    /** Decode, center-downscale to a 256px avatar, JPEG-compress, base64. Keeps the Firestore doc tiny. */
-    private fun encodeAvatar(uri: Uri): String {
-        val src = contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
-            ?: throw IllegalStateException("decode failed")
-        val maxDim = max(src.width, src.height).coerceAtLeast(1)
-        val scale = (256f / maxDim).coerceAtMost(1f)
-        val scaled = Bitmap.createScaledBitmap(src, (src.width * scale).toInt().coerceAtLeast(1), (src.height * scale).toInt().coerceAtLeast(1), true)
-        val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-    }
 }
-
-/** Decode a base64 avatar for display, or null. */
-private fun decodeAvatar(b64: String): androidx.compose.ui.graphics.ImageBitmap? =
-    if (b64.isBlank()) null else try {
-        val bytes = Base64.decode(b64, Base64.NO_WRAP)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-    } catch (_: Exception) { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

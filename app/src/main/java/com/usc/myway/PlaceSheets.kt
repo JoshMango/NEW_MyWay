@@ -144,7 +144,6 @@ fun PlaceDetailsSheet(
     val placeId = place.id ?: System.identityHashCode(place).toString()
 
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
-    var openReview by remember { mutableStateOf<Review?>(null) }
     var showAllReviews by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
@@ -248,12 +247,12 @@ fun PlaceDetailsSheet(
                 }
             }
 
-            // Reviews
+            // Reviews — hidden behind a button; the list opens in a dialog on tap.
             place.reviews?.takeIf { it.isNotEmpty() }?.let { reviews ->
-                Text("REVIEWS", fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-                    color = onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 6.dp))
-                reviews.take(5).forEach { r -> ReviewCard(r) { openReview = r } }
+                Spacer(Modifier.height(10.dp))
+                Box(Modifier.padding(horizontal = 20.dp)) {
+                    SheetButton("⭐  Reviews (${reviews.size})", onSurface.copy(alpha = 0.06f), TealDeep) { showAllReviews = true }
+                }
             }
 
             if (isSaved) {
@@ -272,9 +271,7 @@ fun PlaceDetailsSheet(
             PhotoViewerDialog(photos.take(8), start, placesClient, placeId, photoCache) { viewerIndex = null }
         }
     }
-    // Full review reader (single card tap)
-    openReview?.let { r -> ReviewDialog(r) { openReview = null } }
-    // All reviews (rating-pill tap)
+    // All reviews (rating-pill or Reviews-button tap)
     if (showAllReviews) AllReviewsDialog(place.reviews.orEmpty()) { showAllReviews = false }
 }
 
@@ -355,30 +352,6 @@ private fun ReviewFull(r: Review) {
 }
 
 @Composable
-private fun ReviewCard(r: Review, onClick: () -> Unit) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val text = r.text ?: ""
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).clickable(onClick = onClick),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            ReviewHeader(r)
-            if (text.isNotEmpty()) {
-                Text(text, fontSize = 13.sp, color = onSurface.copy(alpha = 0.8f), lineHeight = 19.sp,
-                    maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
-                if (text.length > 180) {
-                    Text("Read more", color = TealDeep, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 6.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ReviewHeader(r: Review) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val author = r.authorAttribution?.name ?: "Anonymous"
@@ -400,24 +373,6 @@ private fun ReviewHeader(r: Review) {
         Pill(Amber.copy(alpha = 0.15f)) {
             Text("★", color = Amber, fontSize = 12.sp)
             Text(r.rating.toString(), color = onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-/* ── Full review reader ────────────────────────────────────────────────── */
-
-@Composable
-private fun ReviewDialog(r: Review, onDismiss: () -> Unit) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(20.dp)) {
-                ReviewHeader(r)
-                Text(r.text ?: "", fontSize = 14.sp, color = onSurface.copy(alpha = 0.85f), lineHeight = 21.sp,
-                    modifier = Modifier.padding(top = 14.dp))
-                Spacer(Modifier.height(16.dp))
-                SheetButton("Close", Teal, Color.White, onDismiss)
-            }
         }
     }
 }

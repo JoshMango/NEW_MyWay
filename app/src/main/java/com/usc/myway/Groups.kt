@@ -1,0 +1,133 @@
+// Group travel circles + group chat on Firestore.
+//   groups/{gid}                { name, owner, members:[uid], admins:[uid], tags:{uid:tag}, createdAt }
+//   groups/{gid}/messages/{mid} { from, fromTag, text, ts }
+// Members are added by @tag but only from your friends (enforced client-side). owner is always an admin.
+// Callback-based (no coroutines-play-services dependency).
+package com.usc.myway
+
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+
+data class Group(
+    val id: String,
+    val name: String,
+    val owner: String,
+    val members: List<String>,
+    val admins: List<String>,
+    val tags: Map<String, String>,
+    val photo: String = "",
+) {
+    fun isAdmin(uid: String) = uid == owner || uid in admins
+    fun tagOf(uid: String) = tags[uid] ?: "unknown"
+}
+
+/** A chat message is either text or an image (base64 JPEG). */
+data class GroupMessage(val id: String, val from: String, val fromTag: String, val text: String, val image: String = "")
+
+object Groups {
+
+    private val db get() = FirebaseFirestore.getInstance()
+
+    fun createGroup(owner: String, ownerTag: String, name: String, friends: List<UserHit>, onDone: (String?) -> Unit) {
+        val members = (listOf(owner) + friends.map { it.uid }).distinct()
+        val tags = (mapOf(owner to ownerTag) + friends.associate { it.uid to it.tag })
+        db.collection("groups").document().set(
+            mapOf(
+                "name" to name.trim(),
+                "owner" to owner,
+                "members" to members,
+                "admins" to listOf(owner),
+                "tags" to tags,
+                "createdAt" to FieldValue.serverTimestamp(),
+            )
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not create group") }
+    }
+
+    /** Groups I'm in. */
+    fun listenMyGroups(uid: String, onChange: (List<Group>) -> Unit): ListenerRegistration =
+        db.collection("groups").whereArrayContains("members", uid)
+            .addSnapshotListener { snap, _ ->
+                if (snap != null) onChange(snap.documents.mapNotNull { mapGroup(it.id, it) })
+            }
+
+    /** Live single group doc — drives the roster/role UI. onChange(null) if it's gone (deleted/kicked). */
+    fun listenGroup(gid: String, onChange: (Group?) -> Unit): ListenerRegistration =
+        db.collection("groups").document(gid)
+            .addSnapshotListener { doc, _ -> onChange(if (doc != null && doc.exists()) mapGroup(gid, doc) else null) }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mapGroup(id: String, d: com.google.firebase.firestore.DocumentSnapshot): Group? {
+        val owner = d.getString("owner") ?: return null
+        return Group(
+            id = id,
+            name = d.getString("name") ?: "Group",
+            owner = owner,
+            members = (d.get("members") as? List<String>) ?: emptyList(),
+            admins = (d.get("admins") as? List<String>) ?: emptyList(),
+            tags = (d.get("tags") as? Map<String, String>) ?: emptyMap(),
+            photo = d.getString("photo") ?: "",
+        )
+    }
+
+    /** Admin-only in the UI: set the group avatar (base64 JPEG inline in the group doc). */
+    fun updatePhoto(gid: String, base64: String, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).update("photo", base64)
+            .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not set photo") }
+    }
+
+    // ── Chat ────────────────────────────────────────────────────────────────────
+    fun listenMessages(gid: String, onChange: (List<GroupMessage>) -> Unit): ListenerRegistration =
+        db.collection("groups").document(gid).collection("messages")
+            .orderBy("ts", Query.Direction.ASCENDING)
+            .addSnapshotListener { snap, _ ->
+                if (snap != null) onChange(snap.documents.map {
+                    GroupMessage(it.id, it.getString("from") ?: "", it.getString("fromTag") ?: "",
+                        it.getString("text") ?: "", it.getString("image") ?: "")
+                })
+            }
+
+    fun sendMessage(gid: String, fromUid: String, fromTag: String, text: String) {
+        val body = text.trim()
+        if (body.isEmpty()) return
+        post(gid, mapOf("from" to fromUid, "fromTag" to fromTag, "text" to body))
+    }
+
+    fun sendImage(gid: String, fromUid: String, fromTag: String, base64: String) {
+        if (base64.isEmpty()) return
+        post(gid, mapOf("from" to fromUid, "fromTag" to fromTag, "text" to "", "image" to base64))
+    }
+
+    private fun post(gid: String, fields: Map<String, Any>) {
+        // ponytail: client millis for ordering so a just-sent message doesn't jump on a null server timestamp.
+        // Ceiling: cross-device clock skew can misorder near-simultaneous messages; swap to serverTimestamp if it matters.
+        db.collection("groups").document(gid).collection("messages").document()
+            .set(fields + ("ts" to System.currentTimeMillis()))
+    }
+
+    // ── Membership / roles ────────────────────────────────────────────────────────
+    fun addMember(gid: String, friend: UserHit, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).update(
+            "members", FieldValue.arrayUnion(friend.uid),
+            "tags.${friend.uid}", friend.tag,
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not add") }
+    }
+
+    fun kickMember(gid: String, uid: String, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).update(
+            "members", FieldValue.arrayRemove(uid),
+            "admins", FieldValue.arrayRemove(uid),
+            "tags.$uid", FieldValue.delete(),
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not remove") }
+    }
+
+    /** Owner-only in the UI. */
+    fun setAdmin(gid: String, uid: String, makeAdmin: Boolean, onDone: (String?) -> Unit) {
+        val op = if (makeAdmin) FieldValue.arrayUnion(uid) else FieldValue.arrayRemove(uid)
+        db.collection("groups").document(gid).update("admins", op)
+            .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
+    }
+
+    fun leaveGroup(gid: String, uid: String, onDone: (String?) -> Unit) = kickMember(gid, uid, onDone)
+}

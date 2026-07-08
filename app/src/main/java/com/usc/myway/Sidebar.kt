@@ -56,6 +56,7 @@ interface SidebarActions {
     fun onSetAddress()
     fun onProfile()
     fun onFriends()
+    fun onGroups()
     fun onToggleTheme()
     fun onLogout()
     fun onTrackingChanged(enabled: Boolean)
@@ -94,6 +95,7 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
                 SectionLabel("SOCIAL")
                 SbItem("😀", "My Profile", actions::onProfile)
                 SbItem("👥", "Friends", actions::onFriends)
+                SbItem("🧭", "Groups", actions::onGroups)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")

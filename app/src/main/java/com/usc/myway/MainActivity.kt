@@ -529,6 +529,7 @@ class MainActivity : ComponentActivity() {
         override fun onSetAddress() { drawerOpen = false; startAddressPicker() }
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
+        override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, GroupsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
         override fun onTrackingChanged(enabled: Boolean) { stats.tracking = enabled; if (enabled) startLocationUpdates() else { applyHeadingMode(false); stopLocationUpdates() } }
