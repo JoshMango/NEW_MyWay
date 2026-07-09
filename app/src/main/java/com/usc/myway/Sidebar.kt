@@ -57,6 +57,7 @@ interface SidebarActions {
     fun onProfile()
     fun onFriends()
     fun onGroups()
+    fun onSettings()
     fun onToggleTheme()
     fun onLogout()
     fun onTrackingChanged(enabled: Boolean)
@@ -112,6 +113,7 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")
+                SbItem("⚙️", "Settings", actions::onSettings)
                 SbToggle("📡", "Tracking", state.tracking) { state.tracking = it; actions.onTrackingChanged(it) }
                 SbItem(
                     if (state.darkMode) "☀️" else "🌙",

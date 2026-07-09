@@ -25,6 +25,9 @@
             android:name=".CollectionsActivity"
             android:exported="false" />
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
+        <activity
             android:name=".LiveLocationActivity"
             android:exported="false" />
         <activity

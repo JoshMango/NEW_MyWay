@@ -23,9 +23,16 @@ class MapMarkerManager(private val context: Context) {
     private var pencilIcon: BitmapDescriptor? = null
     private var notesCollapsed: Boolean? = null
     private var dark = false
+    // User-configurable appearance (Settings screen), read from App on each refresh.
+    private var pinHue = 0f
+    private var pinIcon = "📝"
+    private var pencilGlyph = "✏️"
 
     fun refresh(map: GoogleMap, app: App, dark: Boolean) {
-        if (dark != this.dark) { pencilIcon = null; this.dark = dark }
+        val newPencil = app.getPencilIcon()
+        if (dark != this.dark || newPencil != pencilGlyph) { pencilIcon = null } // rebuild the cached pencil bitmap
+        this.dark = dark; pencilGlyph = newPencil
+        pinHue = app.getPinHue(); pinIcon = app.getPinIcon()
         markerKeys.keys.forEach { it.remove() }
         labelKeys.keys.forEach { it.remove() }
         markerKeys.clear(); labelKeys.clear(); noteFullIcons.clear()
@@ -43,7 +50,7 @@ class MapMarkerManager(private val context: Context) {
                     String.format("%.5f, %.5f", loc.latitude, loc.longitude) else name
                 val marker = map.addMarker(
                     MarkerOptions().position(pos).title(title)
-                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                        .icon(BitmapDescriptorFactory.defaultMarker(pinHue))
                 )
                 if (marker != null) {
                     markerKeys[marker] = key
@@ -65,7 +72,7 @@ class MapMarkerManager(private val context: Context) {
     }
 
     private fun addPinNoteLabel(map: GoogleMap, pos: LatLng, title: String, note: String, key: String) {
-        val full = buildLabelBitmap(context, title, note, 0f, dark)
+        val full = buildLabelBitmap(context, title, note, 0f, dark, pinIcon)
         // Billboard (not flat): stays upright/readable as the map rotates, like Google's labels.
         val label = map.addMarker(
             MarkerOptions().position(LatLng(pos.latitude + 0.00018, pos.longitude))
@@ -77,7 +84,7 @@ class MapMarkerManager(private val context: Context) {
 
     private fun addLandmarkNoteLabel(map: GoogleMap, pos: LatLng, note: String, key: String) {
         // Note floats slightly NORTH of the store icon; billboard so it stays upright on rotation.
-        val full = buildLabelBitmap(context, "", note, 0f, dark)
+        val full = buildLabelBitmap(context, "", note, 0f, dark, pinIcon)
         val label = map.addMarker(
             MarkerOptions().position(LatLng(pos.latitude + 0.00018, pos.longitude))
                 .icon(full).anchor(0.5f, 1.0f).zIndex(2f)
@@ -98,7 +105,7 @@ class MapMarkerManager(private val context: Context) {
     }
 
     private fun pencil(): BitmapDescriptor =
-        pencilIcon ?: buildPencilBitmap(context, dark).also { pencilIcon = it }
+        pencilIcon ?: buildPencilBitmap(context, dark, pencilGlyph).also { pencilIcon = it }
 
     companion object {
         private const val LABEL_ZOOM = 18f
@@ -108,7 +115,7 @@ class MapMarkerManager(private val context: Context) {
 /* Note bitmaps — top-level so both MapMarkerManager (personal) and TripLayer (session) render identical labels. */
 
 /** Small circle with a pencil — the collapsed state of a note. */
-internal fun buildPencilBitmap(ctx: Context, dark: Boolean): BitmapDescriptor {
+internal fun buildPencilBitmap(ctx: Context, dark: Boolean, glyph: String = "✏️"): BitmapDescriptor {
             val d = ctx.resources.displayMetrics.density
             val size = (32 * d).toInt()
             val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -121,18 +128,18 @@ internal fun buildPencilBitmap(ctx: Context, dark: Boolean): BitmapDescriptor {
             tp.textSize = 15 * d
             tp.textAlign = Paint.Align.CENTER
             val fm = tp.fontMetrics
-            c.drawText("✏️", size / 2f, size / 2f - (fm.ascent + fm.descent) / 2f, tp)
+            c.drawText(glyph, size / 2f, size / 2f - (fm.ascent + fm.descent) / 2f, tp)
             return BitmapDescriptorFactory.fromBitmap(bmp)
         }
 
 /** Modern rounded note card: white pill, soft shadow, dark title, teal note. topPad reserves
  *  transparent space above the card so an anchor(0.5,0) marker sits below the map point. */
-internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean): BitmapDescriptor {
+internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean, noteIcon: String = "📝"): BitmapDescriptor {
             val d = ctx.resources.displayMetrics.density
             val padH = 12 * d; val padV = 9 * d; val lineGap = 4 * d; val shadow = 6 * d; val radius = 12 * d
             val hasTitle = title.isNotEmpty()
             val hasNote = note.isNotEmpty()
-            val noteText = if (hasNote) "📝 $note" else ""
+            val noteText = if (hasNote) "$noteIcon $note" else ""
 
             val cardColor = if (dark) 0xFF243244.toInt() else Color.WHITE
             val tp = Paint(Paint.ANTI_ALIAS_FLAG)

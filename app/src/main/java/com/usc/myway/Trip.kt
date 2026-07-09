@@ -19,6 +19,9 @@ object Trip {
     data class TripPin(val id: String, val from: String, val fromTag: String, val fromPhoto: String, val lat: Double, val lng: Double, val name: String, val note: String)
     /** A shared destination for the whole trip. [done] = uids who've arrived or ended it; cleared once all live members are done. */
     data class TripDest(val id: String, val lat: Double, val lng: Double, val name: String, val by: String, val byTag: String, val done: List<String>)
+    data class OfferPin(val lat: Double, val lng: Double, val name: String, val note: String)
+    /** An offer to add a whole collection's pins to the trip (trip-only "share collection" feature). */
+    data class TripOffer(val id: String, val from: String, val fromTag: String, val fromPhoto: String, val name: String, val pins: List<OfferPin>)
 
     // A member is considered gone if their heartbeat is older than this (crash/no-cleanup guard).
     // The foreground service heartbeats every ~20s, so 60s is a safe 3× margin.
@@ -64,6 +67,12 @@ object Trip {
     fun listenMyTrip(uid: String, onChange: (String?) -> Unit): ListenerRegistration =
         meRef(uid).addSnapshotListener { d, _ -> onChange(if (d != null && d.exists()) d.getString("gid") else null) }
 
+    /** One-shot: my current trip's group id (or null). */
+    fun currentTrip(uid: String, onResult: (String?) -> Unit) {
+        meRef(uid).get().addOnSuccessListener { onResult(if (it.exists()) it.getString("gid") else null) }
+            .addOnFailureListener { onResult(null) }
+    }
+
     /** Everyone currently live in [gid]. */
     fun listenMembers(gid: String, onChange: (List<Member>) -> Unit): ListenerRegistration =
         db.collection("trip_participants").whereEqualTo("gid", gid)
@@ -90,14 +99,18 @@ object Trip {
     fun endSession(gid: String, onDone: (String?) -> Unit) {
         val groupRef = db.collection("groups").document(gid)
         val pinsCol = groupRef.collection("trip_pins")
+        val offersCol = groupRef.collection("trip_offers")
         val partsQ = db.collection("trip_participants").whereEqualTo("gid", gid)
         pinsCol.get().addOnSuccessListener { pinSnap ->
-            partsQ.get().addOnSuccessListener { partSnap ->
-                val batch = db.batch()
-                pinSnap.documents.forEach { batch.delete(it.reference) }
-                partSnap.documents.forEach { batch.delete(it.reference) }
-                batch.update(groupRef, "tripActive", false)
-                batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
+            offersCol.get().addOnSuccessListener { offerSnap ->
+                partsQ.get().addOnSuccessListener { partSnap ->
+                    val batch = db.batch()
+                    pinSnap.documents.forEach { batch.delete(it.reference) }
+                    offerSnap.documents.forEach { batch.delete(it.reference) }
+                    partSnap.documents.forEach { batch.delete(it.reference) }
+                    batch.update(groupRef, "tripActive", false)
+                    batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
+                }.addOnFailureListener { onDone(it.message ?: "Failed") }
             }.addOnFailureListener { onDone(it.message ?: "Failed") }
         }.addOnFailureListener { onDone(it.message ?: "Failed") }
     }
@@ -145,6 +158,56 @@ object Trip {
                 }
             }
         }
+    }
+
+    // ── Shared collection offers (trip-only) ───────────────────────────────────────
+    private const val OFFER_TTL_MS = 15 * 60_000L
+
+    /** Broadcast a collection to the trip; members get a modal to add its pins. Attribution stays with [fromUid]. */
+    fun shareCollection(gid: String, fromUid: String, fromTag: String, fromPhoto: String, name: String,
+                        pins: List<OfferPin>, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).collection("trip_offers").document().set(
+            mapOf(
+                "from" to fromUid, "fromTag" to fromTag, "fromPhoto" to fromPhoto, "name" to name,
+                "pins" to pins.map { mapOf("lat" to it.lat, "lng" to it.lng, "name" to it.name, "note" to it.note) },
+                "createdAt" to FieldValue.serverTimestamp(),
+                "expireAt" to Timestamp(Date(System.currentTimeMillis() + OFFER_TTL_MS)),
+            )
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Couldn't share collection") }
+    }
+
+    fun listenOffers(gid: String, onChange: (List<TripOffer>) -> Unit): ListenerRegistration =
+        db.collection("groups").document(gid).collection("trip_offers")
+            .addSnapshotListener { snap, _ ->
+                if (snap == null) return@addSnapshotListener
+                onChange(snap.documents.mapNotNull { d ->
+                    val exp = d.getTimestamp("expireAt")?.toDate()?.time ?: 0L
+                    if (exp < System.currentTimeMillis()) return@mapNotNull null   // stale offer
+                    @Suppress("UNCHECKED_CAST")
+                    val raw = (d.get("pins") as? List<Map<String, Any>>) ?: emptyList()
+                    val pins = raw.mapNotNull { m ->
+                        val lat = (m["lat"] as? Number)?.toDouble() ?: return@mapNotNull null
+                        val lng = (m["lng"] as? Number)?.toDouble() ?: return@mapNotNull null
+                        OfferPin(lat, lng, m["name"]?.toString() ?: "", m["note"]?.toString() ?: "")
+                    }
+                    TripOffer(d.id, d.getString("from") ?: "", d.getString("fromTag") ?: "",
+                        d.getString("fromPhoto") ?: "", d.getString("name") ?: "Collection", pins)
+                })
+            }
+
+    /** Batch-add accepted offer pins as trip pins (attributed to the original sharer). */
+    fun addPins(gid: String, fromUid: String, fromTag: String, fromPhoto: String, pins: List<OfferPin>, onDone: (String?) -> Unit) {
+        if (pins.isEmpty()) { onDone(null); return }
+        val col = db.collection("groups").document(gid).collection("trip_pins")
+        val batch = db.batch()
+        pins.forEach { p ->
+            batch.set(col.document(), mapOf(
+                "from" to fromUid, "fromTag" to fromTag, "fromPhoto" to fromPhoto,
+                "lat" to p.lat, "lng" to p.lng, "name" to p.name, "note" to p.note,
+                "createdAt" to FieldValue.serverTimestamp(),
+            ))
+        }
+        batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Couldn't add") }
     }
 
     // ── Shared pins ───────────────────────────────────────────────────────────────
