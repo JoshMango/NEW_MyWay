@@ -12,7 +12,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Geocoder
 import android.location.Location
-import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import java.util.Locale
@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -144,7 +145,6 @@ class MainActivity : ComponentActivity() {
 
     private var savedLat = 0.0
     private var savedLng = 0.0
-    private var savedAddress = ""
 
     // Compose state
     private val stats = StatsState()
@@ -194,6 +194,10 @@ class MainActivity : ComponentActivity() {
     private var pendingOffer by mutableStateOf<Trip.TripOffer?>(null)   // collection-share modal
     private val handledOffers = mutableSetOf<String>()
     private var lastOffers: List<Trip.TripOffer> = emptyList()
+    private var tripPlanListener: ListenerRegistration? = null
+    private var tripPlan by mutableStateOf<Trip.TripPlan?>(null)        // shared objective queue
+    private var showPlanSheet by mutableStateOf(false)
+    private var routeIsPlan by mutableStateOf(false)                    // current trip direction is plan-driven (auto)
     private var currentTripGid by mutableStateOf<String?>(null)
     // Live location share (Messenger-style) — one live_shares/{myUid} doc, independent of trips.
     private var liveShareListener: ListenerRegistration? = null
@@ -227,6 +231,8 @@ class MainActivity : ComponentActivity() {
         hasLocationPerm = granted
         if (granted) startLocationUpdates()
     }
+    // POST_NOTIFICATIONS (Android 13+); result ignored — notifications just stay off if declined.
+    private val notifPermLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -251,6 +257,13 @@ class MainActivity : ComponentActivity() {
         if (!hasLocationPerm) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         else startLocationUpdates()
 
+        // Group notifications: ask for POST_NOTIFICATIONS (13+) and start the app-wide watcher.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (myUid.isNotEmpty()) { NotificationHub.start(this, myUid); FcmTokens.register(myUid) }
+
         setContent { MyWayTheme(darkTheme = isDarkMode()) { MainScreen() } }
     }
 
@@ -264,8 +277,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove()
-        myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null
+        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove(); tripPlanListener?.remove()
+        myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
         liveShareListener?.remove(); liveShareListener = null
     }
 
@@ -374,10 +387,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Live-trip bar — sits under the search row; tap Leave to go offline.
+            // Live-trip bar — sits under the search row; tap Leave to go offline. Plan pill below it.
             if (currentTripGid != null && !navigating) {
-                Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 66.dp)) {
+                Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 66.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
                     TripLiveBar(tripGroupName, tripMembers.size, onClick = { showTripRoster = true }, onLeave = { leaveTrip() })
+                    Spacer(Modifier.height(8.dp))
+                    val planLabel = tripPlan?.let { p ->
+                        if (p.archived) "📋 Plan complete" else "📋 Plan · ${p.items.count { it.finished }}/${p.items.size}"
+                    } ?: "📋 New plan"
+                    Box(
+                        Modifier.shadow(4.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surface).clickable { showPlanSheet = true }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) { Text(planLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface) }
                 }
             }
 
@@ -415,6 +438,7 @@ class MainActivity : ComponentActivity() {
                             routes = routes,
                             selectedIndex = selectedRouteIndex,
                             isTripDirection = routeIsTrip,
+                            isPlanStop = routeIsPlan,
                             onMode = { changeTravelMode(it) },
                             onSelectRoute = { selectRoute(it) },
                             onStart = { startNavigation() },
@@ -640,6 +664,17 @@ class MainActivity : ComponentActivity() {
         tripPinDraft?.let { d -> TripPinDialog(d) }
         shareTarget?.let { t -> ShareToGroupDialog(t) }
         if (showLiveShareDialog) LiveShareDialog()
+        if (showPlanSheet && currentTripGid != null) {
+            PlanSheet(
+                plan = tripPlan,
+                placesClient = placesClient,
+                onCreate = { name -> currentTripGid?.let { Trip.createPlan(it, name, myUid, myTag) { e -> if (e != null) toast("Couldn't create plan: $e") } } },
+                onAddItem = { n, lat, lng -> currentTripGid?.let { Trip.addPlanItem(it, n, lat, lng, myUid, myTag) { e -> if (e != null) toast("Couldn't add: $e") } } },
+                onToggle = { id, fin -> currentTripGid?.let { Trip.setItemFinished(it, id, fin, myUid, myTag) { e -> if (e != null) toast(e) } } },
+                onPause = { p -> currentTripGid?.let { Trip.setPlanPaused(it, p, myUid, myTag) { e -> if (e != null) toast(e) } } },
+                onDismiss = { showPlanSheet = false },
+            )
+        }
         pendingOffer?.let { offer ->
             AlertDialog(
                 onDismissRequest = { dismissOffer(offer) },
@@ -660,12 +695,15 @@ class MainActivity : ComponentActivity() {
                 name = name,
                 onTrip = {
                     directionChoice = null
+                    val planActive = tripPlan?.archived == false
                     currentTripGid?.let { gid ->
-                        Trip.setTripDest(gid, dest.latitude, dest.longitude, name, myUid, myTag) { err ->
+                        if (planActive) Trip.prependPlanItem(gid, name, dest.latitude, dest.longitude, myUid, myTag) { err ->
+                            if (err != null) toast("Couldn't add to plan: $err")
+                        } else Trip.setTripDest(gid, dest.latitude, dest.longitude, name, myUid, myTag) { err ->
                             if (err != null) toast("Couldn't set trip direction: $err")
                         }
                     }
-                    beginDirections(dest, name, isTrip = true)
+                    beginDirections(dest, name, isTrip = true, isPlan = planActive)
                 },
                 onMeOnly = { directionChoice = null; beginDirections(dest, name, isTrip = false) },
                 onDismiss = { directionChoice = null },
@@ -1036,12 +1074,12 @@ class MainActivity : ComponentActivity() {
     /** My participant doc changed (joined/left/switched groups) → (re)wire the live listeners. */
     private fun onMyTripChanged(gid: String?) {
         currentTripGid = gid
-        tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove()
-        tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null
+        tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove(); tripPlanListener?.remove()
+        tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
         refresh() // swap personal ↔ session pins on the map
         if (gid == null) {
             tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""
-            pendingOffer = null; lastOffers = emptyList()
+            pendingOffer = null; lastOffers = emptyList(); tripPlan = null; showPlanSheet = false
             if (routeIsTrip) { routeIsTrip = false; clearDirections() } // left the trip → drop its shared direction
             googleMap?.let { tripLayer.clear() }
             return
@@ -1052,6 +1090,7 @@ class MainActivity : ComponentActivity() {
         tripPinsListener = Trip.listenPins(gid) { tripPins = it; renderTrip() }
         tripDestListener = Trip.listenTripDest(gid) { onTripDestChanged(it) }
         tripOffersListener = Trip.listenOffers(gid) { onTripOffers(it) }
+        tripPlanListener = Trip.listenPlan(gid) { tripPlan = it }
     }
 
     /* ── Shared collection offers (trip-only) ───────────────────────────── */
@@ -1091,6 +1130,8 @@ class MainActivity : ComponentActivity() {
         val ll = LatLng(dest.lat, dest.lng)
         if (routeIsTrip && routeDest == ll) { incomingTripDest = null; return } // already following this exact one
         if (routeIsTrip) { routeIsTrip = false; clearDirections() }             // a replaced dest → drop the old shared route
+        // Plan-driven direction → auto-navigate everyone (no opt-in modal; advances on "finished", not arrival).
+        if (dest.planItemId.isNotEmpty()) { beginDirections(ll, dest.name.ifEmpty { "Plan stop" }, isTrip = true, isPlan = true); return }
         if (myUid in dest.done) { incomingTripDest = null; return }             // I already ended/dismissed this one
         if (dest.by == myUid) { beginDirections(ll, dest.name.ifEmpty { "Trip destination" }, isTrip = true); return } // I set it → follow my own
         incomingTripDest = dest                    // someone else set it → prompt (Join / Dismiss)
@@ -1119,9 +1160,9 @@ class MainActivity : ComponentActivity() {
         beginDirections(dest, name, isTrip = false)
     }
 
-    private fun beginDirections(dest: LatLng, name: String, isTrip: Boolean) {
+    private fun beginDirections(dest: LatLng, name: String, isTrip: Boolean, isPlan: Boolean = false) {
         if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
-        routeIsTrip = isTrip
+        routeIsTrip = isTrip; routeIsPlan = isPlan
         routeDest = dest; routeDestName = name; travelMode = TravelMode.DRIVE
         fetchRouteAndShow()
     }
@@ -1158,14 +1199,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun closeDirections() {
-        if (routeIsTrip) { endTripDirection(); return } // trip route: closing = ending it for me
+        if (routeIsPlan) { routeIsTrip = false; clearDirections(); return } // plan route: just stop my nav (plan runs on)
+        if (routeIsTrip) { endTripDirection(); return }                     // manual trip route: closing = ending it for me
         clearDirections()
     }
 
     private fun clearDirections() {
         if (navigating) { navigating = false; tts?.stop(); exitNavLocationUpdates() }
         routeDest = null; routeDestName = ""; routes = emptyList(); routePoints = emptyList()
-        routeLoading = false; currentStepIndex = 0; navDistanceToNext = 0
+        routeLoading = false; currentStepIndex = 0; navDistanceToNext = 0; routeIsPlan = false
     }
 
     /** End the shared trip direction for me only (leaves it running for everyone else). */
@@ -1193,7 +1235,8 @@ class MainActivity : ComponentActivity() {
         navigating = false
         tts?.stop()
         exitNavLocationUpdates()
-        if (routeIsTrip) endTripDirection()   // exiting a shared trip route ends it for me
+        if (routeIsPlan) { routeIsTrip = false; clearDirections() }  // plan route: stop my nav; plan continues for others
+        else if (routeIsTrip) endTripDirection()                     // manual trip route ends it for me
         else routes.getOrNull(selectedRouteIndex)?.let { fitToRoute(it.points) }
     }
 
@@ -1229,7 +1272,8 @@ class MainActivity : ComponentActivity() {
             if (currentStepIndex < steps.size) speak(steps[currentStepIndex].instruction)
             else {
                 speak("You have arrived at your destination")
-                if (routeIsTrip) endTripDirection() // arrival counts as done; clears trip-wide once all arrive
+                // Plan stops advance only when explicitly marked finished — arrival does nothing.
+                if (routeIsTrip && !routeIsPlan) endTripDirection() // manual dir: arrival counts as done
             }
         }
     }
@@ -1377,7 +1421,7 @@ class MainActivity : ComponentActivity() {
                 Geocoder(this).getFromLocation(lat, lng, 1)?.firstOrNull()?.getAddressLine(0)
             } catch (e: Exception) { null }
             runOnUiThread {
-                if (addr != null) { savedAddress = addr; stats.address = addr } else stats.address = "Unable to get address"
+                stats.address = addr ?: "Unable to get address"
             }
         }
     }
@@ -1405,6 +1449,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        FcmTokens.unregister(myUid)
+        NotificationHub.stop()
         FirebaseAuth.getInstance().signOut()
         GoogleSignIn.getClient(this, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut()
         startActivity(Intent(this, LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })

@@ -61,6 +61,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation("com.google.firebase:firebase-messaging")
 
     implementation(platform(libs.compose.bom))
     implementation(libs.androidx.activity.compose)

@@ -44,24 +44,40 @@
 
 ## 📖 Project Structure
 
-Everything is Kotlin + Jetpack Compose in one flat package — no Java, no XML layouts.
+Everything is Kotlin + Jetpack Compose in one flat package — no Java, no XML layouts. Local data lives in `App.kt` (SharedPreferences); everything social lives in Firebase Firestore.
 
 ```
 app/src/main/
 ├── java/com/usc/myway/
 │   ├── LoginActivity.kt / RegisterActivity.kt   # Auth screens (Firebase)
+│   ├── OnboardingActivity.kt                    # First-run @tag claim
 │   ├── AuthComponents.kt                        # Shared auth composables
-│   ├── MainActivity.kt                          # Map home screen (maps-compose)
-│   ├── MapMarkers.kt                            # Pin/label rendering (MapMarkerManager)
+│   ├── MainActivity.kt                          # Map home / hub (maps-compose)
+│   ├── MapMarkers.kt                            # Personal pin/label rendering (MapMarkerManager)
 │   ├── PlaceSheets.kt                           # Marker + landmark-detail bottom sheets
-│   ├── Sidebar.kt / BottomCard.kt / SearchBar.kt # Map overlays (drawer, stats, search)
-│   ├── MapPickerActivity.kt                     # Waypoint / address picker
-│   ├── ShowSavedLocations.kt                    # Saved waypoints + collections (tabs)
-│   ├── App.kt                                   # Application singleton, local data store
-│   ├── Collection.kt                            # Collection model
+│   ├── Directions.kt / DirectionsUi.kt          # Routes API client + directions/nav UI
+│   ├── Sidebar.kt / BottomCard.kt / SearchBar.kt # Map overlays (drawer, stats, voice search)
+│   ├── ProfileActivity.kt / ProfileCard.kt      # Profile settings + reusable Discord-style card
+│   ├── Avatar.kt                                # AvatarCircle, base64 image encode/decode
+│   ├── FriendsActivity.kt / Friends.kt          # Find friends by @tag, requests, friendships
+│   ├── GroupsActivity.kt / Groups.kt            # Group list + Firestore group/chat helpers
+│   ├── GroupChatActivity.kt                     # Group chat, images, info sheet (roles/roster)
+│   ├── Trip.kt / TripArrows.kt                  # Group Trips (live location, session pins, offers)
+│   ├── TripLocationService.kt                   # Foreground location publisher (heartbeat/TTL)
+│   ├── LiveShare.kt / LiveLocationActivity.kt   # Messenger-style live-location sharing
+│   ├── SharedPinActivity.kt                     # Shared-pin preview screen
+│   ├── CollectionsActivity.kt / Collection.kt   # Collections viewer + model
+│   ├── SettingsActivity.kt                      # Pin colour/icons, delete local data
+│   ├── Notifier.kt / NotificationHub.kt         # In-app heads-up notifications
+│   ├── FcmTokens.kt / MyFirebaseMessagingService.kt # FCM push (killed-app notifications)
+│   ├── Profiles.kt                              # User profile + @tag/banner Firestore helpers
+│   ├── App.kt                                   # Application singleton, local data store, settings
 │   └── ui/theme/Theme.kt                        # Material3 theme (MyWayTheme)
 ├── res/
 │   ├── raw/map_dark.json                        # Google Maps night style
 │   ├── drawable/, drawable-nodpi/               # Icons (Google, GitHub, launcher)
 │   └── values/                                  # colors.xml, theme.xml, strings.xml
+firestore.rules                                  # Firestore security rules (deploy via Firebase CLI)
+firebase.json                                    # Firebase CLI config (rules + functions)
+functions/                                       # Cloud Functions — FCM push on new message / trip start
 ```

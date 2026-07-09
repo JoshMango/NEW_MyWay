@@ -14,3 +14,9 @@
 .cxx
 local.properties
 secrets.properties
+
+# Local AI assistant guidance (not shared)
+CLAUDE.md
+
+# Cloud Functions
+functions/node_modules/

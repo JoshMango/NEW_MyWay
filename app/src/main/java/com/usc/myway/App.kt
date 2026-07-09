@@ -1,9 +1,12 @@
 // local database of the app (retrieve/save/store/CRUD) — SharedPreferences-backed, per CLAUDE.md.
 package com.usc.myway
 
+import android.app.Activity
 import android.app.Application
 import android.location.Location
+import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
+import com.google.firebase.auth.FirebaseAuth
 
 class App : Application() {
 
@@ -20,6 +23,19 @@ class App : Application() {
         AppCompatDelegate.setDefaultNightMode(
             if (isDarkMode()) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
         )
+        Notifier.ensureChannels(this)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            private var started = 0
+            override fun onActivityStarted(activity: Activity) { started++; inForeground = true }
+            override fun onActivityStopped(activity: Activity) { started--; if (started <= 0) inForeground = false }
+            override fun onActivityCreated(activity: Activity, s: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, out: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+        // Relaunch while already signed in → start watching for group notifications + register push token.
+        FirebaseAuth.getInstance().currentUser?.uid?.let { NotificationHub.start(this, it); FcmTokens.register(it) }
     }
 
     private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -62,6 +78,10 @@ class App : Application() {
     //    a trip from the group chat) can seed a location without their own GPS fix. ──
     @Volatile var lastLat: Double = 0.0
     @Volatile var lastLng: Double = 0.0
+
+    // Is any activity currently in the foreground? FCM uses this to skip pushing when NotificationHub
+    // (the live foreground listener) already handles the alert.
+    @Volatile var inForeground = false
 
     // ── Locations ──────────────────────────────────────────────────────────────
     fun saveLocation(loc: Location) { myLocations.add(loc); saveLocationsToPrefs() }

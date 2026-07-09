@@ -57,6 +57,13 @@
             android:name=".TripLocationService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <service
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <activity
             android:name=".RegisterActivity"
             android:exported="false" />

@@ -17,8 +17,17 @@ object Trip {
 
     data class Member(val uid: String, val tag: String, val photo: String, val lat: Double?, val lng: Double?)
     data class TripPin(val id: String, val from: String, val fromTag: String, val fromPhoto: String, val lat: Double, val lng: Double, val name: String, val note: String)
-    /** A shared destination for the whole trip. [done] = uids who've arrived or ended it; cleared once all live members are done. */
-    data class TripDest(val id: String, val lat: Double, val lng: Double, val name: String, val by: String, val byTag: String, val done: List<String>)
+    /** A shared destination for the whole trip. [done] = uids who've arrived or ended it; cleared once all live members are done.
+     *  [planItemId] non-empty means it's driven by the Plan (auto-navigate, advances on "finished" not arrival). */
+    data class TripDest(val id: String, val lat: Double, val lng: Double, val name: String, val by: String, val byTag: String, val done: List<String>, val planItemId: String = "")
+
+    // ── Plan (a shared, ordered queue of objectives that auto-drives the trip direction) ──
+    data class PlanItem(val id: String, val name: String, val lat: Double, val lng: Double, val finished: Boolean)
+    data class TripPlan(val name: String, val paused: Boolean, val archived: Boolean, val items: List<PlanItem>) {
+        /** First not-finished item, unless paused/archived — this is what drives the group direction. */
+        val activeItem: PlanItem? get() = if (paused || archived) null else items.firstOrNull { !it.finished }
+        val complete: Boolean get() = items.isNotEmpty() && items.all { it.finished }
+    }
     data class OfferPin(val lat: Double, val lng: Double, val name: String, val note: String)
     /** An offer to add a whole collection's pins to the trip (trip-only "share collection" feature). */
     data class TripOffer(val id: String, val from: String, val fromTag: String, val fromPhoto: String, val name: String, val pins: List<OfferPin>)
@@ -108,7 +117,8 @@ object Trip {
                     pinSnap.documents.forEach { batch.delete(it.reference) }
                     offerSnap.documents.forEach { batch.delete(it.reference) }
                     partSnap.documents.forEach { batch.delete(it.reference) }
-                    batch.update(groupRef, "tripActive", false)
+                    batch.delete(planRef(gid))                               // clear the plan
+                    batch.update(groupRef, "tripActive", false, "tripDest", FieldValue.delete())
                     batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
                 }.addOnFailureListener { onDone(it.message ?: "Failed") }
             }.addOnFailureListener { onDone(it.message ?: "Failed") }
@@ -138,6 +148,7 @@ object Trip {
                 id = m["id"]?.toString() ?: "", lat = lat, lng = lng,
                 name = m["name"]?.toString() ?: "", by = m["by"]?.toString() ?: "", byTag = m["byTag"]?.toString() ?: "",
                 done = (m["done"] as? List<*>)?.map { it.toString() } ?: emptyList(),
+                planItemId = m["planItemId"]?.toString() ?: "",
             ))
         }
 
@@ -209,6 +220,85 @@ object Trip {
         }
         batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Couldn't add") }
     }
+
+    // ── Plan ────────────────────────────────────────────────────────────────────────
+    // groups/{gid}/trip_plan/current — a single ordered queue. Every edit runs in a transaction that
+    // ALSO writes group.tripDest to the active item, so the group direction stays in lock-step (no races).
+    private fun planRef(gid: String) = db.collection("groups").document(gid).collection("trip_plan").document("current")
+
+    private class PlanState(var name: String, var paused: Boolean, val items: MutableList<PlanItem>)
+
+    private fun parseItems(d: DocumentSnapshot): MutableList<PlanItem> {
+        @Suppress("UNCHECKED_CAST")
+        val raw = (d.get("items") as? List<Map<String, Any>>) ?: emptyList()
+        return raw.mapNotNull { m ->
+            val lat = (m["lat"] as? Number)?.toDouble() ?: return@mapNotNull null
+            val lng = (m["lng"] as? Number)?.toDouble() ?: return@mapNotNull null
+            PlanItem(m["id"]?.toString() ?: "", m["name"]?.toString() ?: "", lat, lng, m["finished"] as? Boolean ?: false)
+        }.toMutableList()
+    }
+
+    fun listenPlan(gid: String, onChange: (TripPlan?) -> Unit): ListenerRegistration =
+        planRef(gid).addSnapshotListener { d, _ ->
+            onChange(if (d == null || !d.exists()) null else
+                TripPlan(d.getString("name") ?: "Plan", d.getBoolean("paused") ?: false,
+                    d.getBoolean("archived") ?: false, parseItems(d)))
+        }
+
+    /** Core: read the plan, apply [edit] (return null to abort), write it back, and re-point tripDest at the active item. */
+    private fun edit(gid: String, actorUid: String, actorTag: String, onDone: (String?) -> Unit,
+                     edit: (PlanState?) -> PlanState?) {
+        val pRef = planRef(gid); val gRef = db.collection("groups").document(gid)
+        db.runTransaction { txn ->
+            val snap = txn.get(pRef)
+            val cur = if (snap.exists()) PlanState(snap.getString("name") ?: "Plan", snap.getBoolean("paused") ?: false, parseItems(snap)) else null
+            val next = edit(cur) ?: return@runTransaction null
+            val archived = next.items.isNotEmpty() && next.items.all { it.finished }
+            txn.set(pRef, mapOf(
+                "name" to next.name, "paused" to next.paused, "archived" to archived,
+                "items" to next.items.map { mapOf("id" to it.id, "name" to it.name, "lat" to it.lat, "lng" to it.lng, "finished" to it.finished) },
+            ))
+            // Steer the group direction — unless paused (then freeze the current direction).
+            if (!next.paused) {
+                val active = if (archived) null else next.items.firstOrNull { !it.finished }
+                if (active == null) txn.update(gRef, "tripDest", FieldValue.delete())
+                else txn.update(gRef, "tripDest", mapOf(
+                    "id" to active.id, "lat" to active.lat, "lng" to active.lng, "name" to active.name,
+                    "by" to actorUid, "byTag" to actorTag, "done" to emptyList<String>(), "planItemId" to active.id))
+            }
+            null
+        }.addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Plan update failed") }
+    }
+
+    private fun newId() = java.util.UUID.randomUUID().toString().take(10)
+
+    fun createPlan(gid: String, name: String, actorUid: String, actorTag: String, onDone: (String?) -> Unit) =
+        edit(gid, actorUid, actorTag, onDone) { PlanState(name.ifBlank { "Trip plan" }, false, mutableListOf()) }
+
+    fun addPlanItem(gid: String, name: String, lat: Double, lng: Double, actorUid: String, actorTag: String, onDone: (String?) -> Unit) =
+        edit(gid, actorUid, actorTag, onDone) { cur ->
+            cur ?: return@edit null
+            cur.items.add(PlanItem(newId(), name, lat, lng, false)); cur
+        }
+
+    /** A manual group direction while a plan is active → insert at the front of the uncrushed items (and resume). */
+    fun prependPlanItem(gid: String, name: String, lat: Double, lng: Double, actorUid: String, actorTag: String, onDone: (String?) -> Unit) =
+        edit(gid, actorUid, actorTag, onDone) { cur ->
+            cur ?: return@edit null
+            val idx = cur.items.indexOfFirst { !it.finished }.let { if (it < 0) cur.items.size else it }
+            cur.items.add(idx, PlanItem(newId(), name, lat, lng, false)); cur.paused = false; cur
+        }
+
+    fun setItemFinished(gid: String, itemId: String, finished: Boolean, actorUid: String, actorTag: String, onDone: (String?) -> Unit) =
+        edit(gid, actorUid, actorTag, onDone) { cur ->
+            cur ?: return@edit null
+            val i = cur.items.indexOfFirst { it.id == itemId }
+            if (i >= 0) cur.items[i] = cur.items[i].copy(finished = finished)
+            cur
+        }
+
+    fun setPlanPaused(gid: String, paused: Boolean, actorUid: String, actorTag: String, onDone: (String?) -> Unit) =
+        edit(gid, actorUid, actorTag, onDone) { cur -> cur ?: return@edit null; cur.paused = paused; cur }
 
     // ── Shared pins ───────────────────────────────────────────────────────────────
     fun sharePin(gid: String, fromUid: String, fromTag: String, fromPhoto: String, lat: Double, lng: Double, name: String, note: String) {
