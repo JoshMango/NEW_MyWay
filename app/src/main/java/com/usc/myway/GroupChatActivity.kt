@@ -113,6 +113,8 @@ class GroupChatActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        NotificationHub.activeChatGid = gid          // don't notify for the chat I'm reading
+        Notifier.clearMessages(this, gid)            // clear any pending notification for it
         listeners += Groups.listenMessages(gid) { s.messages = it }
         listeners += Friends.listenFriends(uid) { s.friends = it }
         listeners += Trip.listenMembers(gid) { s.tripMembers = it }
@@ -124,6 +126,7 @@ class GroupChatActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        if (NotificationHub.activeChatGid == gid) NotificationHub.activeChatGid = null
         listeners.forEach { it.remove() }; listeners.clear()
     }
 

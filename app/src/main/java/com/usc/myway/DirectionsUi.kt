@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -53,6 +52,7 @@ fun DirectionsPanel(
     routes: List<RouteResult>,
     selectedIndex: Int,
     isTripDirection: Boolean = false,
+    isPlanStop: Boolean = false,
     onMode: (TravelMode) -> Unit,
     onSelectRoute: (Int) -> Unit,
     onStart: () -> Unit,
@@ -73,12 +73,12 @@ fun DirectionsPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(if (isTripDirection) "🔴  TRIP DIRECTION" else "DIRECTIONS TO", fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = TealDeep)
+                    Text(if (isPlanStop) "📋  PLAN · NEXT STOP" else if (isTripDirection) "🔴  TRIP DIRECTION" else "DIRECTIONS TO",
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = TealDeep)
                     Text(destName.ifEmpty { "Destination" }, fontSize = 19.sp, fontWeight = FontWeight.Bold,
                         color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (isTripDirection) Text("Shared with everyone on the trip", fontSize = 12.sp,
-                        color = onSurface.copy(alpha = 0.6f))
+                    if (isTripDirection) Text(if (isPlanStop) "Part of the trip plan" else "Shared with everyone on the trip",
+                        fontSize = 12.sp, color = onSurface.copy(alpha = 0.6f))
                 }
                 CircleIcon("✕", onSurface, onSurface.copy(alpha = 0.06f), onClose)
             }

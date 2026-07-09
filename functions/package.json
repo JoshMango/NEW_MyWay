@@ -1,0 +1,13 @@
+{
+  "name": "myway-functions",
+  "description": "Cloud Functions for MyWay push notifications (group messages + trip start).",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.1.0"
+  },
+  "private": true
+}

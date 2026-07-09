@@ -156,9 +156,11 @@ class ProfileActivity : ComponentActivity() {
 
     /** Delete the user's cloud profile (+ local data), then sign out to the login screen. */
     private fun deleteData() {
+        FcmTokens.unregister(uid)
         Profiles.deleteMyData(uid, Profiles.normalize(s.tag)) { err ->
             if (err != null) { s.toast = err; return@deleteMyData }
             (application as App).clearLocalData()
+            NotificationHub.stop()
             FirebaseAuth.getInstance().signOut()
             startActivity(Intent(this, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK

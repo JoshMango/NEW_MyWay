@@ -20,6 +20,12 @@ service cloud.firestore {
       allow write: if request.auth.uid == uid;
     }
 
+    // FCM push tokens — owner writes only. The Cloud Function reads these via the Admin SDK (which
+    // bypasses rules), so clients never need read access.
+    match /fcm_tokens/{uid} {
+      allow read, write: if request.auth.uid == uid;
+    }
+
     // @tag uniqueness index. A handle can only point at yourself; only its owner may change/release it.
     match /usernames/{tagLower} {
       allow read:   if signedIn();
@@ -57,6 +63,11 @@ service cloud.firestore {
         allow read:   if member(gid);
         allow create: if member(gid) && request.resource.data.from == request.auth.uid;
         allow delete: if member(gid);
+      }
+
+      // Trip plan (shared objective queue) — any member reads and edits.
+      match /trip_plan/{doc} {
+        allow read, write: if member(gid);
       }
     }
 
