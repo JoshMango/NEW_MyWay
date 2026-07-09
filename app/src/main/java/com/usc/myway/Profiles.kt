@@ -104,5 +104,16 @@ object Profiles {
             }
     }
 
+    /** Delete the user's own cloud profile: their user doc, @tag reservation, and banner. */
+    fun deleteMyData(uid: String, tagLower: String, onDone: (String?) -> Unit) {
+        val batch = db.batch()
+        batch.delete(db.collection("users").document(uid))
+        if (tagLower.isNotEmpty()) batch.delete(db.collection("usernames").document(tagLower))
+        batch.delete(db.collection("user_banners").document(uid))
+        batch.commit()
+            .addOnSuccessListener { onDone(null) }
+            .addOnFailureListener { onDone(it.message ?: "Couldn't delete your data") }
+    }
+
     private class TakenException : Exception()
 }

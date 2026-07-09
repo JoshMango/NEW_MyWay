@@ -28,6 +28,28 @@ class App : Application() {
     fun isDarkMode(): Boolean = prefs().getBoolean(KEY_DARK_MODE, false)
     fun setDarkMode(enabled: Boolean) { prefs().edit().putBoolean(KEY_DARK_MODE, enabled).apply() }
 
+    // ── Local marker-appearance settings (Settings screen) ───────────────────────
+    // pinHue = BitmapDescriptorFactory hue (0=red…330=rose); pinIcon = note-card emoji; pencilIcon = collapsed-note glyph.
+    fun getPinHue(): Float = prefs().getFloat(KEY_PIN_HUE, 0f)
+    fun setPinHue(hue: Float) { prefs().edit().putFloat(KEY_PIN_HUE, hue).apply() }
+    fun getPinIcon(): String = prefs().getString(KEY_PIN_ICON, "📝") ?: "📝"
+    fun setPinIcon(icon: String) { prefs().edit().putString(KEY_PIN_ICON, icon).apply() }
+    fun getPencilIcon(): String = prefs().getString(KEY_PENCIL_ICON, "✏️") ?: "✏️"
+    fun setPencilIcon(icon: String) { prefs().edit().putString(KEY_PENCIL_ICON, icon).apply() }
+
+    /** Wipe locally-saved map data: pins, notes, names, landmark placeIds, collections. Keeps settings & sign-in. */
+    fun clearLocalData() {
+        myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear(); collections.clear()
+        val ed = prefs().edit()
+        for (k in prefs().all.keys.toList()) {
+            if (k.startsWith(KEY_NOTE_PREFIX) || k.startsWith(KEY_NAME_PREFIX) || k.startsWith(KEY_PLACEID_PREFIX) ||
+                k.startsWith(KEY_LOC_LAT) || k.startsWith(KEY_LOC_LNG) ||
+                k.startsWith(KEY_COLLECTION_NAME) || k.startsWith(KEY_COLLECTION_ICON) || k.startsWith(KEY_COLLECTION_KEYS)
+            ) ed.remove(k)
+        }
+        ed.remove(KEY_LOC_COUNT); ed.remove(KEY_COLLECTION_COUNT); ed.apply()
+    }
+
     // ── User @tag cache (keyed by uid) — lets sign-in skip onboarding + a Firestore read. ──
     fun getUserTag(uid: String): String = prefs().getString(KEY_USER_TAG + uid, "") ?: ""
     fun setUserTag(uid: String, tag: String) { prefs().edit().putString(KEY_USER_TAG + uid, tag).apply() }
@@ -186,6 +208,9 @@ class App : Application() {
         private const val KEY_COLLECTION_ICON = "collection_icon_"
         private const val KEY_COLLECTION_KEYS = "collection_keys_"
         private const val KEY_DARK_MODE = "dark_mode"
+        private const val KEY_PIN_HUE = "pin_hue"
+        private const val KEY_PIN_ICON = "pin_icon"
+        private const val KEY_PENCIL_ICON = "pencil_icon"
         private const val KEY_USER_TAG = "usertag_"
         private const val KEY_USER_PHOTO = "userphoto_"
 

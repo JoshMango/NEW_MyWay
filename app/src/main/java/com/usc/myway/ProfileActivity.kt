@@ -3,6 +3,7 @@
 // in the user's Firestore doc (users/{uid}.photo) — no Firebase Storage bucket/dependency.
 package com.usc.myway
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -56,6 +57,7 @@ import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
 private val TealDeep = Color(0xFF00A77D)
+private val Danger = Color(0xFFEF4444)
 
 /** Live screen state the activity pushes into the Composables. */
 private class ProfileState {
@@ -104,6 +106,7 @@ class ProfileActivity : ComponentActivity() {
                     onPickBanner = { pickBanner.launch("image/*") },
                     onSaveName = ::saveName,
                     onSaveTag = ::saveTag,
+                    onDeleteData = ::deleteData,
                 )
             }
         }
@@ -151,6 +154,19 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    /** Delete the user's cloud profile (+ local data), then sign out to the login screen. */
+    private fun deleteData() {
+        Profiles.deleteMyData(uid, Profiles.normalize(s.tag)) { err ->
+            if (err != null) { s.toast = err; return@deleteMyData }
+            (application as App).clearLocalData()
+            FirebaseAuth.getInstance().signOut()
+            startActivity(Intent(this, LoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            finish()
+        }
+    }
+
     private fun uploadBanner(uri: Uri) {
         s.savingBanner = true
         // Wider than the avatar; still capped so the banner doc stays lean.
@@ -172,8 +188,10 @@ private fun ProfileScreen(
     onPickBanner: () -> Unit,
     onSaveName: () -> Unit,
     onSaveTag: (String) -> Unit,
+    onDeleteData: () -> Unit,
 ) {
     var tagField by remember(s.tag) { mutableStateOf(s.tag) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -284,8 +302,33 @@ private fun ProfileScreen(
                     Text(msg, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
             }
+
+            Spacer(Modifier.height(32.dp))
+            SectionLabel("DANGER ZONE")
+            androidx.compose.material3.OutlinedButton(
+                onClick = { confirmDelete = true },
+                modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
+                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Danger),
+            ) { Text("🗑️  Delete my data", fontWeight = FontWeight.Bold) }
+            Text("Permanently deletes your profile, @tag and banner from the server, wipes this device's saved pins, and signs you out.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
             } // end padded content column
         }
+    }
+
+    if (confirmDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete your data?", fontWeight = FontWeight.Bold) },
+            text = { Text("This permanently deletes your profile, @tag and banner, and removes saved pins on this device. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDeleteData() }) {
+                    Text("Delete", color = Danger, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
     }
 }
 

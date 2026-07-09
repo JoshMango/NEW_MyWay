@@ -190,6 +190,10 @@ class MainActivity : ComponentActivity() {
     private var tripMembersListener: ListenerRegistration? = null
     private var tripPinsListener: ListenerRegistration? = null
     private var tripDestListener: ListenerRegistration? = null
+    private var tripOffersListener: ListenerRegistration? = null
+    private var pendingOffer by mutableStateOf<Trip.TripOffer?>(null)   // collection-share modal
+    private val handledOffers = mutableSetOf<String>()
+    private var lastOffers: List<Trip.TripOffer> = emptyList()
     private var currentTripGid by mutableStateOf<String?>(null)
     // Live location share (Messenger-style) — one live_shares/{myUid} doc, independent of trips.
     private var liveShareListener: ListenerRegistration? = null
@@ -260,8 +264,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove()
-        myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null
+        myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove()
+        myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null
         liveShareListener?.remove(); liveShareListener = null
     }
 
@@ -636,6 +640,21 @@ class MainActivity : ComponentActivity() {
         tripPinDraft?.let { d -> TripPinDialog(d) }
         shareTarget?.let { t -> ShareToGroupDialog(t) }
         if (showLiveShareDialog) LiveShareDialog()
+        pendingOffer?.let { offer ->
+            AlertDialog(
+                onDismissRequest = { dismissOffer(offer) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                        AvatarCircle(photo = offer.fromPhoto, fallback = "@${offer.fromTag}", size = 36.dp)
+                        Text("@${offer.fromTag} shared a collection", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                },
+                text = { Text("Add “${offer.name}” — ${offer.pins.size} place${if (offer.pins.size == 1) "" else "s"} — to this trip? Everyone on the trip will see them.") },
+                confirmButton = { TextButton(onClick = { acceptOffer(offer) }) { Text("Add", color = Teal, fontWeight = FontWeight.Bold) } },
+                dismissButton = { TextButton(onClick = { dismissOffer(offer) }) { Text("Dismiss") } },
+            )
+        }
         directionChoice?.let { (dest, name) ->
             TripDirectionDialog(
                 name = name,
@@ -881,6 +900,7 @@ class MainActivity : ComponentActivity() {
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, GroupsActivity::class.java)) }
+        override fun onSettings() { drawerOpen = false; startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }
         override fun onTrackingChanged(enabled: Boolean) { stats.tracking = enabled; if (enabled) startLocationUpdates() else { applyHeadingMode(false); stopLocationUpdates() } }
@@ -1016,11 +1036,12 @@ class MainActivity : ComponentActivity() {
     /** My participant doc changed (joined/left/switched groups) → (re)wire the live listeners. */
     private fun onMyTripChanged(gid: String?) {
         currentTripGid = gid
-        tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove()
-        tripMembersListener = null; tripPinsListener = null; tripDestListener = null
+        tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove()
+        tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null
         refresh() // swap personal ↔ session pins on the map
         if (gid == null) {
             tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""
+            pendingOffer = null; lastOffers = emptyList()
             if (routeIsTrip) { routeIsTrip = false; clearDirections() } // left the trip → drop its shared direction
             googleMap?.let { tripLayer.clear() }
             return
@@ -1030,6 +1051,34 @@ class MainActivity : ComponentActivity() {
         tripMembersListener = Trip.listenMembers(gid) { tripMembers = it; renderTrip() }
         tripPinsListener = Trip.listenPins(gid) { tripPins = it; renderTrip() }
         tripDestListener = Trip.listenTripDest(gid) { onTripDestChanged(it) }
+        tripOffersListener = Trip.listenOffers(gid) { onTripOffers(it) }
+    }
+
+    /* ── Shared collection offers (trip-only) ───────────────────────────── */
+    private fun onTripOffers(offers: List<Trip.TripOffer>) { lastOffers = offers; showNextOffer() }
+
+    private fun showNextOffer() {
+        if (pendingOffer != null) return
+        pendingOffer = lastOffers.firstOrNull { it.from != myUid && it.id !in handledOffers }
+    }
+
+    private fun acceptOffer(offer: Trip.TripOffer) {
+        val gid = currentTripGid
+        handledOffers.add(offer.id)
+        pendingOffer = null
+        if (gid != null) {
+            val existing = tripPins.map { App.locationKey(it.lat, it.lng) }.toSet() // skip pins already on the trip
+            val newPins = offer.pins.filter { App.locationKey(it.lat, it.lng) !in existing }
+            if (newPins.isEmpty()) toast("Already on the trip")
+            else Trip.addPins(gid, offer.from, offer.fromTag, offer.fromPhoto, newPins) { err ->
+                toast(err ?: "Added ${newPins.size} place${if (newPins.size == 1) "" else "s"}")
+            }
+        }
+        showNextOffer()
+    }
+
+    private fun dismissOffer(offer: Trip.TripOffer) {
+        handledOffers.add(offer.id); pendingOffer = null; showNextOffer()
     }
 
     /** A shared trip destination appeared, changed, or ended → offer to join (or clear it). Never forced. */
