@@ -30,7 +30,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -84,9 +83,8 @@ class CollectionsActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun CollectionsScreen() {
-        var version by remember { mutableIntStateOf(0) }
-        val collections = remember(version) { app.collections.toList() }
-        var expanded by remember { mutableStateOf<Collection?>(null) }
+        val collections = remember(app.dataVersion) { app.collections.toList() } // repaints on every snapshot
+        var expandedId by remember { mutableStateOf<String?>(null) }
         var tripGid by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) { Trip.currentTrip(uid) { tripGid = it } }
 
@@ -107,10 +105,10 @@ class CollectionsActivity : ComponentActivity() {
                 items(collections) { c ->
                     CollectionCard(
                         c = c,
-                        open = expanded == c,
-                        onToggle = { expanded = if (expanded == c) null else c },
+                        open = expandedId == c.id,
+                        onToggle = { expandedId = if (expandedId == c.id) null else c.id },
                         onOpenPin = { lat, lng -> focus(lat, lng) },
-                        onDelete = { app.removeCollection(c); expanded = null; version++ },
+                        onDelete = { app.removeCollection(c); expandedId = null },
                         onShareToTrip = tripGid?.let { gid -> { shareToTrip(gid, c) } },
                     )
                 }

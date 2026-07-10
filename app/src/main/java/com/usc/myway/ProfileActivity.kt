@@ -159,7 +159,8 @@ class ProfileActivity : ComponentActivity() {
         FcmTokens.unregister(uid)
         Profiles.deleteMyData(uid, Profiles.normalize(s.tag)) { err ->
             if (err != null) { s.toast = err; return@deleteMyData }
-            (application as App).clearLocalData()
+            (application as App).clearMyPlaces()
+            (application as App).unbindUser()
             NotificationHub.stop()
             FirebaseAuth.getInstance().signOut()
             startActivity(Intent(this, LoginActivity::class.java).apply {

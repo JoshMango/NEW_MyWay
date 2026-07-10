@@ -204,6 +204,7 @@ class MainActivity : ComponentActivity() {
     private var liveShare by mutableStateOf<LiveShare.State?>(null)
     private var showLiveShareDialog by mutableStateOf(false)
     private var tripGroupName by mutableStateOf("")
+    private var tripGroupPhoto by mutableStateOf("")
     private var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
     private var tripPins by mutableStateOf<List<Trip.TripPin>>(emptyList())
 
@@ -262,7 +263,7 @@ class MainActivity : ComponentActivity() {
             ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        if (myUid.isNotEmpty()) { NotificationHub.start(this, myUid); FcmTokens.register(myUid) }
+        if (myUid.isNotEmpty()) { app.bindUser(myUid); NotificationHub.start(this, myUid); FcmTokens.register(myUid) }
 
         setContent { MyWayTheme(darkTheme = isDarkMode()) { MainScreen() } }
     }
@@ -355,7 +356,7 @@ class MainActivity : ComponentActivity() {
                     }
                     refreshMap(map, dark)
                 }
-                MapEffect(refreshKey, dark) { map -> refreshMap(map, dark) }
+                MapEffect(refreshKey, dark, app.dataVersion) { map -> refreshMap(map, dark) }
 
                 if (routePoints.isNotEmpty()) {
                     Polyline(points = routePoints, color = Teal, width = 16f)
@@ -402,6 +403,17 @@ class MainActivity : ComponentActivity() {
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     ) { Text(planLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface) }
                 }
+            }
+
+            // Messenger-style chat bubble → the trip's group chat. Only while on a trip.
+            if (currentTripGid != null && !navigating) {
+                Box(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 12.dp)
+                        .shadow(6.dp, CircleShape).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .clickable { openTripChat() }
+                        .padding(3.dp),
+                ) { AvatarCircle(tripGroupPhoto, tripGroupName, size = 50.dp) }
             }
 
             // Top: live maneuver banner while navigating.
@@ -622,12 +634,11 @@ class MainActivity : ComponentActivity() {
                         OutlinedTextField(newName, { newName = it }, Modifier.fillMaxWidth(),
                             label = { Text("Collection name") }, singleLine = true, shape = RoundedCornerShape(12.dp))
                     } else androidx.compose.foundation.layout.Column {
-                        CollectionRow("❌ None") { collections.forEach { it.locationKeys.remove(key) }; app.saveCollectionsToPrefs(); refresh(); collectionKey = null }
+                        CollectionRow("❌ None") { app.setPinCollection(key, null); refresh(); collectionKey = null }
                         collections.forEach { c ->
                             val mark = if (c.locationKeys.contains(key)) "  ✓" else ""
                             CollectionRow("${c.icon} ${c.name}$mark") {
-                                collections.forEach { it.locationKeys.remove(key) }
-                                c.locationKeys.add(key); app.saveCollectionsToPrefs(); refresh(); collectionKey = null
+                                app.setPinCollection(key, c); refresh(); collectionKey = null
                             }
                         }
                         CollectionRow("➕ New collection…") { creating = true }
@@ -637,7 +648,7 @@ class MainActivity : ComponentActivity() {
                     if (creating) TextButton(onClick = {
                         val n = newName.trim()
                         if (n.isNotEmpty()) {
-                            collections.forEach { it.locationKeys.remove(key) }        // one collection per pin
+                            app.setPinCollection(key, null)                            // one collection per pin
                             app.saveCollection(Collection(n, "📁").apply { locationKeys.add(key) })
                             refresh(); collectionKey = null
                         }
@@ -1071,6 +1082,13 @@ class MainActivity : ComponentActivity() {
         renderTrip()
     }
 
+    private fun openTripChat() {
+        val gid = currentTripGid ?: return
+        startActivity(Intent(this, GroupChatActivity::class.java).apply {
+            putExtra("gid", gid); putExtra("name", tripGroupName)
+        })
+    }
+
     /** My participant doc changed (joined/left/switched groups) → (re)wire the live listeners. */
     private fun onMyTripChanged(gid: String?) {
         currentTripGid = gid
@@ -1078,14 +1096,17 @@ class MainActivity : ComponentActivity() {
         tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
         refresh() // swap personal ↔ session pins on the map
         if (gid == null) {
-            tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""
+            tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""; tripGroupPhoto = ""
             pendingOffer = null; lastOffers = emptyList(); tripPlan = null; showPlanSheet = false
             if (routeIsTrip) { routeIsTrip = false; clearDirections() } // left the trip → drop its shared direction
             googleMap?.let { tripLayer.clear() }
             return
         }
         // Ensure the foreground publisher is running (e.g. app relaunched while already in a trip).
-        Groups.fetchName(gid) { name -> tripGroupName = name; TripLocationService.start(this, myUid, name) }
+        Groups.fetchNamePhoto(gid) { name, photo ->
+            tripGroupName = name; tripGroupPhoto = photo
+            TripLocationService.start(this, myUid, name)
+        }
         tripMembersListener = Trip.listenMembers(gid) { tripMembers = it; renderTrip() }
         tripPinsListener = Trip.listenPins(gid) { tripPins = it; renderTrip() }
         tripDestListener = Trip.listenTripDest(gid) { onTripDestChanged(it) }
@@ -1451,6 +1472,7 @@ class MainActivity : ComponentActivity() {
     private fun logout() {
         FcmTokens.unregister(myUid)
         NotificationHub.stop()
+        app.unbindUser()
         FirebaseAuth.getInstance().signOut()
         GoogleSignIn.getClient(this, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut()
         startActivity(Intent(this, LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })

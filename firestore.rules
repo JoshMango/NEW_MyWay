@@ -11,6 +11,10 @@ service cloud.firestore {
     match /users/{uid} {
       allow read:  if signedIn();
       allow write: if request.auth.uid == uid;
+
+      // Personal map data — private to the owner (subcollections don't inherit the rule above).
+      match /places/{key}      { allow read, write: if request.auth.uid == uid; }
+      match /collections/{cid} { allow read, write: if request.auth.uid == uid; }
     }
 
     // Profile banners — kept out of users/{uid} so friend search stays light. Read by anyone signed in
