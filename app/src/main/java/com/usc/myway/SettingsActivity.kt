@@ -105,8 +105,8 @@ class SettingsActivity : ComponentActivity() {
                     onClick = { confirmWipe = true },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
-                ) { Text("🗑️  Delete local data") }
-                Text("Removes every saved pin, note and collection stored on this device. Your account isn't affected.",
+                ) { Text("🗑️  Delete my saved places") }
+                Text("Removes every saved pin, note and collection from your account, on all devices. Your account isn't affected.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     modifier = Modifier.padding(top = 8.dp))
             }
@@ -115,10 +115,10 @@ class SettingsActivity : ComponentActivity() {
         if (confirmWipe) {
             AlertDialog(
                 onDismissRequest = { confirmWipe = false },
-                title = { Text("Delete local data?", fontWeight = FontWeight.Bold) },
-                text = { Text("This permanently removes all saved pins, notes and collections on this device. This can't be undone.") },
+                title = { Text("Delete my saved places?", fontWeight = FontWeight.Bold) },
+                text = { Text("This permanently removes all saved pins, notes and collections from your account, on every device. This can't be undone.") },
                 confirmButton = {
-                    TextButton(onClick = { confirmWipe = false; app.clearLocalData(); toast("Local data deleted") }) {
+                    TextButton(onClick = { confirmWipe = false; app.clearMyPlaces(); toast("Saved places deleted") }) {
                         Text("Delete", color = Danger, fontWeight = FontWeight.Bold)
                     }
                 },

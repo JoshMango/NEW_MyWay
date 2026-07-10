@@ -1,4 +1,6 @@
-// local database of the app (retrieve/save/store/CRUD) — SharedPreferences-backed, per CLAUDE.md.
+// Personal map data lives in Firestore (see Places.kt); this holds the in-memory mirror the map and
+// list screens read, kept current by snapshot listeners. SharedPreferences now only stores device
+// settings (dark mode, marker appearance) and small caches (@tag, avatar).
 package com.usc.myway
 
 import android.app.Activity
@@ -6,7 +8,11 @@ import android.app.Application
 import android.location.Location
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.ListenerRegistration
 
 class App : Application() {
 
@@ -17,9 +23,17 @@ class App : Application() {
     // Google placeId for saved landmarks (POIs). Presence of a key here == "this is a landmark".
     private val locationPlaceIds: MutableMap<String, String> = HashMap()
 
+    /** Bumped on every snapshot. Compose screens read it to repaint when the data changes. */
+    var dataVersion by mutableIntStateOf(0)
+        private set
+
+    private var uid = ""
+    private var placesReg: ListenerRegistration? = null
+    private var collsReg: ListenerRegistration? = null
+
     override fun onCreate() {
         super.onCreate()
-        loadFromPrefs()
+        loadFromPrefs() // legacy data, if any — uploaded and cleared on the next bindUser()
         AppCompatDelegate.setDefaultNightMode(
             if (isDarkMode()) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
         )
@@ -34,8 +48,8 @@ class App : Application() {
             override fun onActivitySaveInstanceState(activity: Activity, out: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
-        // Relaunch while already signed in → start watching for group notifications + register push token.
-        FirebaseAuth.getInstance().currentUser?.uid?.let { NotificationHub.start(this, it); FcmTokens.register(it) }
+        // Relaunch while already signed in → load my places + watch for group notifications + register push token.
+        FirebaseAuth.getInstance().currentUser?.uid?.let { bindUser(it); NotificationHub.start(this, it); FcmTokens.register(it) }
     }
 
     private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -52,19 +66,6 @@ class App : Application() {
     fun setPinIcon(icon: String) { prefs().edit().putString(KEY_PIN_ICON, icon).apply() }
     fun getPencilIcon(): String = prefs().getString(KEY_PENCIL_ICON, "✏️") ?: "✏️"
     fun setPencilIcon(icon: String) { prefs().edit().putString(KEY_PENCIL_ICON, icon).apply() }
-
-    /** Wipe locally-saved map data: pins, notes, names, landmark placeIds, collections. Keeps settings & sign-in. */
-    fun clearLocalData() {
-        myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear(); collections.clear()
-        val ed = prefs().edit()
-        for (k in prefs().all.keys.toList()) {
-            if (k.startsWith(KEY_NOTE_PREFIX) || k.startsWith(KEY_NAME_PREFIX) || k.startsWith(KEY_PLACEID_PREFIX) ||
-                k.startsWith(KEY_LOC_LAT) || k.startsWith(KEY_LOC_LNG) ||
-                k.startsWith(KEY_COLLECTION_NAME) || k.startsWith(KEY_COLLECTION_ICON) || k.startsWith(KEY_COLLECTION_KEYS)
-            ) ed.remove(k)
-        }
-        ed.remove(KEY_LOC_COUNT); ed.remove(KEY_COLLECTION_COUNT); ed.apply()
-    }
 
     // ── User @tag cache (keyed by uid) — lets sign-in skip onboarding + a Firestore read. ──
     fun getUserTag(uid: String): String = prefs().getString(KEY_USER_TAG + uid, "") ?: ""
@@ -83,83 +84,111 @@ class App : Application() {
     // (the live foreground listener) already handles the alert.
     @Volatile var inForeground = false
 
+    /* ── Firestore binding ─────────────────────────────────────────────────── */
+
+    /** Attach the live listeners for [uid]'s places + collections. Idempotent. */
+    fun bindUser(uid: String) {
+        if (uid.isEmpty() || uid == this.uid) return
+        unbindUser()
+        this.uid = uid
+        migrateLegacyPrefs(uid)
+        placesReg = Places.listenPlaces(uid) { docs ->
+            myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear()
+            for (d in docs) {
+                myLocations.add(Location("saved").apply { latitude = d.lat; longitude = d.lng })
+                if (d.name.isNotEmpty()) locationNames[d.key] = d.name
+                if (d.note.isNotEmpty()) locationNotes[d.key] = d.note
+                if (d.placeId.isNotEmpty()) locationPlaceIds[d.key] = d.placeId
+            }
+            dataVersion++
+        }
+        collsReg = Places.listenCollections(uid) { list ->
+            collections.clear()
+            for (c in list) collections.add(Collection(c.name, c.icon, c.id).apply { locationKeys.addAll(c.keys) })
+            dataVersion++
+        }
+    }
+
+    /** Sign-out → drop the listeners and the mirror. */
+    fun unbindUser() {
+        placesReg?.remove(); collsReg?.remove()
+        placesReg = null; collsReg = null; uid = ""
+        clearMirror()
+    }
+
+    private fun clearMirror() {
+        myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear(); collections.clear()
+        dataVersion++
+    }
+
+    /** Wipe my saved places, notes and collections — locally and in Firestore. Keeps settings & sign-in. */
+    fun clearMyPlaces() {
+        if (uid.isNotEmpty()) Places.deleteAll(uid)
+        clearMirror()
+    }
+
     // ── Locations ──────────────────────────────────────────────────────────────
-    fun saveLocation(loc: Location) { myLocations.add(loc); saveLocationsToPrefs() }
+    fun saveLocation(loc: Location) {
+        myLocations.add(loc)
+        Places.savePlace(uid, locationKey(loc.latitude, loc.longitude), loc.latitude, loc.longitude)
+    }
 
     fun removeLocation(loc: Location) {
         val key = locationKey(loc.latitude, loc.longitude) // build key BEFORE removing
         myLocations.remove(loc)
-        saveLocationsToPrefs()
-        for (c in collections) c.locationKeys.remove(key)
-        saveCollectionsToPrefs()
-        removeNote(key); removeLocationName(key); removeLocationPlaceId(key)
+        locationNotes.remove(key); locationNames.remove(key); locationPlaceIds.remove(key)
+        Places.deletePlace(uid, key)
+        for (c in collections) if (c.locationKeys.remove(key)) Places.saveCollection(uid, c)
     }
 
-    // ── Notes ──────────────────────────────────────────────────────────────────
-    fun saveNote(key: String, note: String) {
-        locationNotes[key] = note
-        prefs().edit().putString(KEY_NOTE_PREFIX + key, note).apply()
-    }
+    // ── Per-place attributes (side tables keyed by locationKey) ──────────────────
+    fun saveNote(key: String, note: String) = setAttr(locationNotes, key, "note", note)
+    fun saveLocationName(key: String, name: String) = setAttr(locationNames, key, "name", name)
+    fun saveLocationPlaceId(key: String, placeId: String) = setAttr(locationPlaceIds, key, "placeId", placeId)
 
-    fun removeNote(key: String) {
-        locationNotes.remove(key)
-        prefs().edit().remove(KEY_NOTE_PREFIX + key).apply()
-    }
-
-    // ── Names ──────────────────────────────────────────────────────────────────
-    fun saveLocationName(key: String, name: String) {
-        locationNames[key] = name
-        prefs().edit().putString(KEY_NAME_PREFIX + key, name).apply()
+    private fun setAttr(mirror: MutableMap<String, String>, key: String, field: String, value: String) {
+        if (value.isEmpty()) mirror.remove(key) else mirror[key] = value
+        Places.setPlaceField(uid, key, field, value)
     }
 
     fun getLocationName(key: String): String = locationNames[key] ?: ""
-
-    fun removeLocationName(key: String) {
-        locationNames.remove(key)
-        prefs().edit().remove(KEY_NAME_PREFIX + key).apply()
-    }
-
-    // ── Landmark placeId (marks a saved location as a Google POI) ────────────────
-    fun saveLocationPlaceId(key: String, placeId: String) {
-        locationPlaceIds[key] = placeId
-        prefs().edit().putString(KEY_PLACEID_PREFIX + key, placeId).apply()
-    }
-
     fun getLocationPlaceId(key: String): String = locationPlaceIds[key] ?: ""
     fun isLandmark(key: String): Boolean = locationPlaceIds.containsKey(key)
 
-    fun removeLocationPlaceId(key: String) {
-        locationPlaceIds.remove(key)
-        prefs().edit().remove(KEY_PLACEID_PREFIX + key).apply()
-    }
-
     // ── Collections ──────────────────────────────────────────────────────────────
-    fun saveCollection(c: Collection) { collections.add(c); saveCollectionsToPrefs() }
-    fun removeCollection(c: Collection) { collections.remove(c); saveCollectionsToPrefs() }
+    fun saveCollection(c: Collection) { collections.add(c); Places.saveCollection(uid, c) }
+    fun removeCollection(c: Collection) { collections.remove(c); Places.deleteCollection(uid, c.id) }
 
-    fun saveCollectionsToPrefs() {
-        val ed = prefs().edit()
-        ed.putInt(KEY_COLLECTION_COUNT, collections.size)
-        for (i in collections.indices) {
-            val c = collections[i]
-            ed.putString(KEY_COLLECTION_NAME + i, c.name)
-            ed.putString(KEY_COLLECTION_ICON + i, c.icon)
-            // "||" delimiter — keys contain commas so a comma delimiter would break them.
-            ed.putString(KEY_COLLECTION_KEYS + i, c.locationKeys.joinToString("||"))
+    /** One collection per pin: drop [pinKey] from every collection, then add it to [target] (null = none). */
+    fun setPinCollection(pinKey: String, target: Collection?) {
+        for (c in collections) if (c !== target && c.locationKeys.remove(pinKey)) Places.saveCollection(uid, c)
+        if (target != null && !target.locationKeys.contains(pinKey)) {
+            target.locationKeys.add(pinKey)
+            Places.saveCollection(uid, target)
         }
-        ed.apply()
     }
 
-    // ── Persistence ──────────────────────────────────────────────────────────────
-    private fun saveLocationsToPrefs() {
-        val editor = prefs().edit()
-        editor.putInt(KEY_LOC_COUNT, myLocations.size)
-        for (i in myLocations.indices) {
-            // Save as String to preserve full double precision — fixes key mismatch bug.
-            editor.putString(KEY_LOC_LAT + i, myLocations[i].latitude.toString())
-            editor.putString(KEY_LOC_LNG + i, myLocations[i].longitude.toString())
+    /* ── Legacy SharedPreferences data → Firestore (one-time, then the keys are dropped) ───── */
+
+    private fun migrateLegacyPrefs(uid: String) {
+        if (myLocations.isEmpty() && collections.isEmpty()) return
+        val docs = myLocations.map { l ->
+            val k = locationKey(l.latitude, l.longitude)
+            Places.Doc(k, l.latitude, l.longitude, locationNames[k] ?: "", locationNotes[k] ?: "", locationPlaceIds[k] ?: "")
         }
-        editor.apply()
+        Places.uploadAll(uid, docs, collections.toList())
+        removeLegacyPrefKeys() // the snapshot listener re-populates the mirror from Firestore
+    }
+
+    private fun removeLegacyPrefKeys() {
+        val ed = prefs().edit()
+        for (k in prefs().all.keys.toList()) {
+            if (k.startsWith(KEY_NOTE_PREFIX) || k.startsWith(KEY_NAME_PREFIX) || k.startsWith(KEY_PLACEID_PREFIX) ||
+                k.startsWith(KEY_LOC_LAT) || k.startsWith(KEY_LOC_LNG) ||
+                k.startsWith(KEY_COLLECTION_NAME) || k.startsWith(KEY_COLLECTION_ICON) || k.startsWith(KEY_COLLECTION_KEYS)
+            ) ed.remove(k)
+        }
+        ed.remove(KEY_LOC_COUNT); ed.remove(KEY_COLLECTION_COUNT); ed.apply()
     }
 
     private fun loadFromPrefs() {
@@ -191,7 +220,6 @@ class App : Application() {
             }
         }
         loadCollectionsFromPrefs()
-        saveLocationsToPrefs() // migration: re-save in new String format
     }
 
     private fun loadCollectionsFromPrefs() {
@@ -234,7 +262,7 @@ class App : Application() {
         private const val KEY_USER_TAG = "usertag_"
         private const val KEY_USER_PHOTO = "userphoto_"
 
-        // Key helper — must be consistent everywhere.
+        // Key helper — must be consistent everywhere. Also the Firestore doc id for a place.
         @JvmStatic
         fun locationKey(lat: Double, lng: Double): String = String.format("%.6f,%.6f", lat, lng)
     }

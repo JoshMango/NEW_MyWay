@@ -159,6 +159,10 @@ class GroupChatActivity : ComponentActivity() {
             else {
                 TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
                 Groups.postSystem(gid, "🚗 @$myTag joined the trip")
+                // The trip lives on the map — go there instead of leaving the user in the chat.
+                startActivity(Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                })
             }
         }
         // Mark the session ongoing (best-effort; not needed if it's already active).

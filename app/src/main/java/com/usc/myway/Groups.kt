@@ -74,10 +74,10 @@ object Groups {
             }
 
     /** One-shot group name lookup. */
-    fun fetchName(gid: String, onResult: (String) -> Unit) {
+    fun fetchNamePhoto(gid: String, onResult: (name: String, photo: String) -> Unit) {
         db.collection("groups").document(gid).get()
-            .addOnSuccessListener { onResult(it.getString("name") ?: "Group") }
-            .addOnFailureListener { onResult("Group") }
+            .addOnSuccessListener { onResult(it.getString("name") ?: "Group", it.getString("photo") ?: "") }
+            .addOnFailureListener { onResult("Group", "") }
     }
 
     /** Live single group doc — drives the roster/role UI. onChange(null) if it's gone (deleted/kicked). */
