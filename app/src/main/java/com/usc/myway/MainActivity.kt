@@ -245,13 +245,14 @@ class MainActivity : ComponentActivity() {
         setupLocationRequest()
 
         sidebar.darkMode = isDarkMode(); sidebar.tracking = true
-        // Drawer profile header — tag/photo from cache instantly; name from a one-shot profile fetch.
-        sidebar.userTag = app.getUserTag(myUid); sidebar.userPhoto = app.getUserPhoto(myUid)
+        // Drawer profile header — tag/photo/banner from cache instantly; name from a one-shot profile fetch.
+        loadSidebarProfile()
         if (myUid.isNotEmpty()) Profiles.fetchProfile(myUid) { p ->
             if (p != null) {
                 sidebar.userName = "${p.firstName} ${p.lastName}".trim()
                 sidebar.userTag = p.tag.ifBlank { sidebar.userTag }
                 sidebar.userPhoto = p.photo
+                app.setUserPhoto(myUid, p.photo)
             }
         }
         hasLocationPerm = hasLocationPermission()
@@ -290,8 +291,16 @@ class MainActivity : ComponentActivity() {
         stats.sharingLive = s != null
     }
 
+    /** Cheap prefs read — picks up a photo/banner changed in ProfileActivity the moment we come back. */
+    private fun loadSidebarProfile() {
+        sidebar.userTag = app.getUserTag(myUid)
+        sidebar.userPhoto = app.getUserPhoto(myUid)
+        sidebar.userBanner = app.getUserBanner(myUid)
+    }
+
     override fun onResume() {
         super.onResume()
+        loadSidebarProfile()
         refresh()
         handleFocusIntent(intent)
         handleSharedPlaceIntent(intent)
