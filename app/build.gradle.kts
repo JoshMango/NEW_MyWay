@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.play.services.maps)
     implementation(libs.maps.compose)
     implementation("com.google.android.libraries.places:places:3.3.0")
+    implementation("com.vanniktech:android-image-cropper:4.6.0")
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)

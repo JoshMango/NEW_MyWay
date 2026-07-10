@@ -9,7 +9,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.canhub.cropper.CropImageContract
 import com.google.firebase.auth.FirebaseAuth
 import com.usc.myway.ui.theme.MyWayTheme
 
@@ -90,20 +90,20 @@ class ProfileActivity : ComponentActivity() {
                 (application as App).setUserPhoto(uid, p.photo) // keep the trip-icon cache warm
             }
         }
-        Profiles.fetchBanner(uid) { s.banner = it }
+        Profiles.fetchBanner(uid) { s.banner = it; (application as App).setUserBanner(uid, it) }
         setContent {
             MyWayTheme {
-                val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-                    if (uri != null) uploadPhoto(uri)
+                val cropPhoto = rememberLauncherForActivityResult(CropImageContract()) { r ->
+                    r.uriContent?.takeIf { r.isSuccessful }?.let { uploadPhoto(it) }
                 }
-                val pickBanner = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-                    if (uri != null) uploadBanner(uri)
+                val cropBanner = rememberLauncherForActivityResult(CropImageContract()) { r ->
+                    r.uriContent?.takeIf { r.isSuccessful }?.let { uploadBanner(it) }
                 }
                 ProfileScreen(
                     s = s,
                     onBack = { finish() },
-                    onPickPhoto = { pickImage.launch("image/*") },
-                    onPickBanner = { pickBanner.launch("image/*") },
+                    onPickPhoto = { cropPhoto.launch(avatarCropOptions()) },
+                    onPickBanner = { cropBanner.launch(bannerCropOptions()) },
                     onSaveName = ::saveName,
                     onSaveTag = ::saveTag,
                     onDeleteData = ::deleteData,
@@ -177,7 +177,10 @@ class ProfileActivity : ComponentActivity() {
         if (b64 == null) { s.savingBanner = false; s.toast = "Couldn't read that image"; return }
         Profiles.updateBanner(uid, b64) { err ->
             s.savingBanner = false
-            if (err == null) { s.banner = b64; s.toast = "Banner updated" } else s.toast = err
+            if (err == null) {
+                s.banner = b64; s.toast = "Banner updated"
+                (application as App).setUserBanner(uid, b64) // drawer picks it up on resume
+            } else s.toast = err
         }
     }
 }

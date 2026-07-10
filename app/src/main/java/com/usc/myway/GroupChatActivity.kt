@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -63,20 +64,38 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.canhub.cropper.CropImageContract
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.usc.myway.ui.theme.MyWayTheme
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 private val Teal = Color(0xFF00C99D)
 private val TealDeep = Color(0xFF00A77D)
 private val Danger = Color(0xFFEF4444)
+
+/** Messages closer together than this share one timestamp. */
+private const val BURST_GAP_MS = 60 * 60 * 1000L
+
+/** "3:42 PM" for today, "Mar 4, 3:42 PM" otherwise. */
+private fun stamp(ts: Long): String {
+    val now = Calendar.getInstance()
+    val then = Calendar.getInstance().apply { timeInMillis = ts }
+    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    return SimpleDateFormat(if (sameDay) "h:mm a" else "MMM d, h:mm a", Locale.getDefault()).format(ts)
+}
 
 private class ChatState {
     var group by mutableStateOf<Group?>(null)
     var messages by mutableStateOf<List<GroupMessage>>(emptyList())
     var friends by mutableStateOf<List<UserHit>>(emptyList())
     var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
+    /** uid → base64 avatar, for message bubbles and read receipts. */
+    var photos by mutableStateOf<Map<String, String>>(emptyMap())
 }
 
 class GroupChatActivity : ComponentActivity() {
@@ -115,14 +134,35 @@ class GroupChatActivity : ComponentActivity() {
         super.onStart()
         NotificationHub.activeChatGid = gid          // don't notify for the chat I'm reading
         Notifier.clearMessages(this, gid)            // clear any pending notification for it
-        listeners += Groups.listenMessages(gid) { s.messages = it }
+        listeners += Groups.listenMessages(gid) { s.messages = it; markRead() }
         listeners += Friends.listenFriends(uid) { s.friends = it }
         listeners += Trip.listenMembers(gid) { s.tripMembers = it }
         listeners += Groups.listenGroup(gid) { g ->
             // Group deleted, or I'm no longer a member → close the screen.
-            if (g == null || uid !in g.members) finish() else s.group = g
+            if (g == null || uid !in g.members) finish() else { s.group = g; loadAvatars(g.members) }
         }
     }
+
+    /** I'm looking at the chat → my receipt sits on the newest message. */
+    private fun markRead() {
+        val ts = s.messages.lastOrNull()?.ts ?: return
+        if (s.group?.reads?.get(uid) == ts) return
+        Groups.markRead(gid, uid, ts)
+    }
+
+    // ponytail: one user-doc read per member, once per screen. Groups are small; batch with a
+    // whereIn(documentId) query if a group ever outgrows a handful of members.
+    private fun loadAvatars(members: List<String>) {
+        // My own comes from the local cache so a just-changed photo shows without a round trip.
+        if (uid !in s.photos) s.photos = s.photos + (uid to (application as App).getUserPhoto(uid))
+        for (m in members) {
+            if (m == uid || m in avatarsRequested) continue
+            avatarsRequested += m
+            Profiles.fetchProfile(m) { p -> s.photos = s.photos + (m to (p?.photo ?: "")) }
+        }
+    }
+
+    private val avatarsRequested = mutableSetOf<String>()
 
     override fun onStop() {
         super.onStop()
@@ -233,7 +273,8 @@ private fun ChatScreen(
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
-            MessageList(s.messages, myUid, onOpenPin, onOpenLive, Modifier.weight(1f))
+            MessageList(s.messages, myUid, s.photos, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
+                onOpenPin, onOpenLive, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
     }
@@ -292,8 +333,9 @@ private fun TripBar(
 }
 
 @Composable
-private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: (GroupMessage) -> Unit,
-                        onOpenLive: (GroupMessage) -> Unit, modifier: Modifier) {
+private fun MessageList(messages: List<GroupMessage>, myUid: String, photos: Map<String, String>,
+                        reads: Map<String, Long>, tags: Map<String, String>,
+                        onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit, modifier: Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -304,14 +346,80 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String, onOpenPin: 
         }
         return
     }
+    // Everyone else's receipt hangs on the newest message they've seen — Messenger style.
+    val receipts = remember(messages, reads) {
+        val byMessage = HashMap<String, MutableList<String>>()
+        for ((uid, ts) in reads) {
+            if (uid == myUid) continue
+            val seen = messages.lastOrNull { !it.system && it.ts <= ts } ?: continue
+            byMessage.getOrPut(seen.id) { mutableListOf() }.add(uid)
+        }
+        byMessage
+    }
+    var selectedId by remember { mutableStateOf<String?>(null) }
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 12.dp), state = listState,
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(messages, key = { it.id }) { m -> MessageBubble(m, mine = m.from == myUid, onOpenPin, onOpenLive) }
+        itemsIndexed(messages, key = { _, m -> m.id }) { i, m ->
+            val prev = messages.getOrNull(i - 1)
+            val next = messages.getOrNull(i + 1)
+            Column {
+                // Only stamp the start of a conversation burst, not every message.
+                if (prev == null || m.ts - prev.ts > BURST_GAP_MS) TimeSeparator(m.ts)
+                MessageBubble(
+                    m, mine = m.from == myUid,
+                    photo = photos[m.from] ?: "",
+                    // Avatar only on the last bubble of a run, like Messenger.
+                    showAvatar = next == null || next.from != m.from,
+                    onClick = { selectedId = if (selectedId == m.id) null else m.id },
+                    onOpenPin = onOpenPin, onOpenLive = onOpenLive,
+                )
+                if (selectedId == m.id && !m.system) MessageDetails(m, myUid, reads, tags, mine = m.from == myUid)
+                receipts[m.id]?.let { seenBy -> ReadReceipts(seenBy, photos, tags) }
+            }
+        }
+    }
+}
+
+/** Centered "3:42 PM" chip above the first message of a burst. */
+@Composable
+private fun TimeSeparator(ts: Long) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(stamp(ts), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+    }
+}
+
+/** Tapping a bubble reveals its exact time and who has read it. */
+@Composable
+private fun MessageDetails(m: GroupMessage, myUid: String, reads: Map<String, Long>,
+                           tags: Map<String, String>, mine: Boolean) {
+    val seenBy = reads.filter { (uid, ts) -> uid != m.from && uid != myUid && ts >= m.ts }.keys
+    val seen = if (seenBy.isEmpty()) "Not seen yet"
+    else "Seen by " + seenBy.joinToString { "@${tags[it] ?: "someone"}" }
+    Box(Modifier.fillMaxWidth().padding(start = 34.dp, end = 2.dp, top = 2.dp),
+        contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
+        Text("${stamp(m.ts)} · $seen", fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+    }
+}
+
+/** Tiny avatars under the newest message each member has seen. */
+@Composable
+private fun ReadReceipts(uids: List<String>, photos: Map<String, String>, tags: Map<String, String>) {
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.End) {
+        uids.forEach { uid ->
+            Box(Modifier.padding(start = 2.dp)) {
+                AvatarCircle(photo = photos[uid] ?: "", fallback = tags[uid] ?: "?", size = 14.dp)
+            }
+        }
     }
 }
 
 @Composable
-private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit) {
+private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAvatar: Boolean,
+                          onClick: () -> Unit,
+                          onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit) {
     if (m.system) {
         Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
             Text(m.text, fontSize = 12.sp, fontWeight = FontWeight.Medium,
@@ -322,12 +430,18 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, onOpenPin: (GroupMessa
     val isLive = m.liveFrom.isNotEmpty()
     val isPin = m.pinLat != null && m.pinLng != null
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Bottom,
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+        if (!mine) {
+            // Reserve the gutter even on stacked bubbles so they stay aligned.
+            Box(Modifier.size(28.dp)) { if (showAvatar) AvatarCircle(photo, m.fromTag, 28.dp) }
+            Spacer(Modifier.width(6.dp))
+        }
         Column(
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
                 .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
-                .then(if (isPin) Modifier.clickable { onOpenPin(m) } else Modifier)
-                .then(if (isLive) Modifier.clickable { onOpenLive(m) } else Modifier)
+                // Pin/live cards navigate on tap; everything else toggles its time + seen-by line.
+                .clickable { if (isPin) onOpenPin(m) else if (isLive) onOpenLive(m) else onClick() }
                 .padding(horizontal = if (m.image.isNotEmpty()) 4.dp else 12.dp, vertical = if (m.image.isNotEmpty()) 4.dp else 8.dp),
         ) {
             if (!mine) Text("@${m.fromTag}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep,
@@ -403,8 +517,8 @@ private fun GroupInfoSheet(
     val iAmAdmin = g.isAdmin(myUid)
     val recentImages = remember(messages) { messages.filter { it.image.isNotEmpty() }.takeLast(12).reversed() }
 
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) actions.onSetGroupPhoto(uri)
+    val pickPhoto = rememberLauncherForActivityResult(CropImageContract()) { r ->
+        r.uriContent?.takeIf { r.isSuccessful }?.let { actions.onSetGroupPhoto(it) }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
@@ -414,7 +528,7 @@ private fun GroupInfoSheet(
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     AvatarCircle(photo = g.photo, fallback = g.name, size = 96.dp)
                     if (iAmAdmin) {
-                        TextButton(onClick = { pickPhoto.launch("image/*") }) {
+                        TextButton(onClick = { pickPhoto.launch(avatarCropOptions()) }) {
                             Text(if (g.photo.isBlank()) "Add group photo" else "Change photo", color = TealDeep)
                         }
                     } else Spacer(Modifier.height(8.dp))

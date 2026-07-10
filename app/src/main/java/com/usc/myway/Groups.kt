@@ -19,6 +19,7 @@ data class Group(
     val tags: Map<String, String>,
     val photo: String = "",
     val tripActive: Boolean = false,   // an ongoing trip session (joinable, marked LIVE) — survives everyone leaving
+    val reads: Map<String, Long> = emptyMap(),  // uid → ts of the newest message they've seen (read receipts)
 ) {
     fun isAdmin(uid: String) = uid == owner || uid in admins
     fun tagOf(uid: String) = tags[uid] ?: "unknown"
@@ -38,6 +39,7 @@ data class GroupMessage(
     val pinPlaceId: String = "",   // set when the shared pin is a Google landmark → opens its in-app place page
     val system: Boolean = false,   // trip join/leave notices etc — rendered as a centered chip, not a bubble
     val liveFrom: String = "",     // uid of a live-location sharer → rendered as a tappable live card
+    val ts: Long = 0,              // client millis; also what read receipts compare against
 )
 
 object Groups {
@@ -97,6 +99,7 @@ object Groups {
             tags = (d.get("tags") as? Map<String, String>) ?: emptyMap(),
             photo = d.getString("photo") ?: "",
             tripActive = d.getBoolean("tripActive") ?: false,
+            reads = (d.get("reads") as? Map<String, Long>) ?: emptyMap(),
         )
     }
 
@@ -117,9 +120,14 @@ object Groups {
                         it.getDouble("pinLat"), it.getDouble("pinLng"),
                         it.getString("pinName") ?: "", it.getString("pinNote") ?: "",
                         it.getString("pinPlaceId") ?: "", it.getBoolean("system") ?: false,
-                        it.getString("liveFrom") ?: "")
+                        it.getString("liveFrom") ?: "", it.getLong("ts") ?: 0L)
                 })
             }
+
+    /** Read receipt: remember the newest message [uid] has seen in this group. */
+    fun markRead(gid: String, uid: String, ts: Long) {
+        db.collection("groups").document(gid).update("reads.$uid", ts)
+    }
 
     /** Announce a live-location share in the chat; the card reads live_shares/{fromUid} when tapped. */
     fun postLiveShare(gid: String, fromUid: String, fromTag: String) {

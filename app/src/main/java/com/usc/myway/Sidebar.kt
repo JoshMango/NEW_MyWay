@@ -29,17 +29,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val Teal = Color(0xFF00C99D)
+private val TealDeep = Color(0xFF00A77D)
 private val Danger = Color(0xFFEF4444)
 
 /** Observable state the activity pushes into the drawer (theme + switch positions). */
@@ -49,6 +53,7 @@ class SidebarState {
     var userName by mutableStateOf("")   // for the Discord-style profile header
     var userTag by mutableStateOf("")
     var userPhoto by mutableStateOf("")
+    var userBanner by mutableStateOf("") // "" = teal gradient fallback
 }
 
 /** Callbacks the drawer fires back to the activity. */
@@ -86,19 +91,26 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
             }
 
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                // Discord-style profile header — tap to open profile settings.
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = actions::onProfile)
-                        .background(Teal.copy(alpha = 0.10f)).padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                // Discord-style profile header: banner strip above, avatar + name below. Tap to open settings.
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(Teal.copy(alpha = 0.10f)).clickable(onClick = actions::onProfile),
                 ) {
-                    AvatarCircle(photo = state.userPhoto, fallback = state.userTag.ifBlank { "?" }, size = 44.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(state.userName.ifBlank { "Set up your profile" }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-                        if (state.userTag.isNotBlank()) Text("@${state.userTag}", fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1)
+                    val banner = remember(state.userBanner) { decodeAvatar(state.userBanner) }
+                    Box(Modifier.fillMaxWidth().height(56.dp)) {
+                        if (banner != null) Image(banner, contentDescription = null, contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize())
+                        else Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Teal, TealDeep))))
+                    }
+                    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AvatarCircle(photo = state.userPhoto, fallback = state.userTag.ifBlank { "?" }, size = 44.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(state.userName.ifBlank { "Set up your profile" }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                            if (state.userTag.isNotBlank()) Text("@${state.userTag}", fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1)
+                        }
                     }
                 }
 
