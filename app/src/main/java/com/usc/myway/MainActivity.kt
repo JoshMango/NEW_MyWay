@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -483,6 +484,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Offline banner — Google Maps style: thin bar pinned to the very top, above everything else.
+            AnimatedVisibility(
+                visible = !app.isOnline,
+                modifier = Modifier.align(Alignment.TopCenter),
+                enter = fadeIn(), exit = fadeOut(),
+            ) { ConnectivityBanner() }
+
             // Drawer: full-screen scrim + slide-in panel.
             AnimatedVisibility(drawerOpen, enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
@@ -547,6 +555,18 @@ class MainActivity : ComponentActivity() {
                 Modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xFFEF4444)).clickable(onClick = onLeave)
                     .padding(horizontal = 14.dp, vertical = 6.dp),
             ) { Text("Leave", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+        }
+    }
+
+    @Composable
+    private fun ConnectivityBanner() {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().background(Color(0xFF3C4043)).padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("Reconnecting…", fontSize = 13.sp, color = Color.White)
         }
     }
 
