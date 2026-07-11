@@ -6,10 +6,15 @@ package com.usc.myway
 import android.app.Activity
 import android.app.Application
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.ListenerRegistration
@@ -50,6 +55,15 @@ class App : Application() {
         })
         // Relaunch while already signed in → load my places + watch for group notifications + register push token.
         FirebaseAuth.getInstance().currentUser?.uid?.let { bindUser(it); NotificationHub.start(this, it); FcmTokens.register(it) }
+
+        getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
+            NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+            object : ConnectivityManager.NetworkCallback() {
+                // Track a count, not a flag — WiFi + cellular can both be up, and one dropping shouldn't flip us offline.
+                override fun onAvailable(network: Network) { onlineNetworkCount++; isOnline = true }
+                override fun onLost(network: Network) { onlineNetworkCount--; isOnline = onlineNetworkCount > 0 }
+            },
+        )
     }
 
     private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -86,6 +100,11 @@ class App : Application() {
     // Is any activity currently in the foreground? FCM uses this to skip pushing when NotificationHub
     // (the live foreground listener) already handles the alert.
     @Volatile var inForeground = false
+
+    // True while the device has internet connectivity. Screens read this to show a "reconnecting" banner.
+    var isOnline by mutableStateOf(true)
+        private set
+    private var onlineNetworkCount = 0
 
     /* ── Firestore binding ─────────────────────────────────────────────────── */
 
