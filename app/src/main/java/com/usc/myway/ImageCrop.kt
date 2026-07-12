@@ -12,8 +12,15 @@ private fun options(build: CropImageOptions.() -> Unit) = CropImageContractOptio
     CropImageOptions(
         imageSourceIncludeCamera = false,
         fixAspectRatio = true,
+        // Force high-contrast colors for the toolbar and "Done" menu item
+        toolbarColor = 0xFF00A77D.toInt(),        // TealDeep
+        toolbarTitleColor = 0xFFFFFFFF.toInt(),   // White
+        toolbarBackButtonColor = 0xFFFFFFFF.toInt(),
+        activityMenuIconColor = 0xFFFFFFFF.toInt(),
+        cropMenuCropButtonTitle = "Save",         // Explicit text label
+        
         outputCompressFormat = Bitmap.CompressFormat.JPEG,
-        outputCompressQuality = 90, // encodeImage() does the real downscale/compress afterwards
+        outputCompressQuality = 90,
         guidelines = CropImageView.Guidelines.ON_TOUCH,
     ).apply(build),
 )

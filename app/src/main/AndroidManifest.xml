@@ -63,6 +63,12 @@
         <activity
             android:name=".SharedPinActivity"
             android:exported="false" />
+
+        <!-- Fixed: Cropper activity must have a theme with an Action Bar for the Save menu to show -->
+        <activity
+            android:name="com.canhub.cropper.CropImageActivity"
+            android:theme="@style/Theme.AppCompat.Light.DarkActionBar" />
+
         <service
             android:name=".TripLocationService"
             android:exported="false"
