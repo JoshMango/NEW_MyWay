@@ -975,6 +975,7 @@ class MainActivity : ComponentActivity() {
 
     private val sidebarActions = object : SidebarActions {
         override fun onCollections() { drawerOpen = false; startActivity(Intent(this@MainActivity, CollectionsActivity::class.java)) }
+        override fun onWaypoints() { drawerOpen = false; startActivity(Intent(this@MainActivity, WaypointsActivity::class.java)) }
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, GroupsActivity::class.java)) }

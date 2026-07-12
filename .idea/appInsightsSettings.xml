@@ -8,10 +8,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.usc.myway" />
+                  <option name="mobileSdkAppId" value="1:953641079637:android:817a3173401d5f009dd5dc" />
+                  <option name="projectId" value="myway-b2954" />
+                  <option name="projectNumber" value="953641079637" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

@@ -59,9 +59,11 @@ class SidebarState {
 /** Callbacks the drawer fires back to the activity. */
 interface SidebarActions {
     fun onCollections()
+    fun onWaypoints()
     fun onProfile()
     fun onFriends()
     fun onGroups()
+    fun onMessages()
     fun onSettings()
     fun onToggleTheme()
     fun onLogout()
@@ -117,9 +119,11 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
                 Spacer(Modifier.height(14.dp))
                 SectionLabel("PLACES")
                 SbItem("📁", "Collections", actions::onCollections)
+                SbItem("📌", "Waypoints", actions::onWaypoints)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")
+                SbItem("💬", "Messages", actions::onMessages)
                 SbItem("👥", "Friends", actions::onFriends)
                 SbItem("🧭", "Groups", actions::onGroups)
 
