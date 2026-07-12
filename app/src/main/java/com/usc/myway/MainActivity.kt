@@ -646,7 +646,14 @@ class MainActivity : ComponentActivity() {
             AlertDialog(
                 onDismissRequest = { noteKey = null },
                 title = { Text("📝 Edit Note") },
-                text = { OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) },
+                text = {
+                    Column {
+                        OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                        Box(Modifier.padding(top = 4.dp)) {
+                            EmojiPickerButton { emoji -> text += emoji }
+                        }
+                    }
+                },
                 confirmButton = { TextButton(onClick = { app.saveNote(key, text.trim()); refresh(); noteKey = null }) { Text("Save") } },
                 dismissButton = { TextButton(onClick = { noteKey = null }) { Text("Cancel") } },
             )
@@ -808,8 +815,13 @@ class MainActivity : ComponentActivity() {
                     OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") },
                         singleLine = true, shape = RoundedCornerShape(12.dp))
                     androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 8.dp))
-                    OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Notes") },
-                        minLines = 2, maxLines = 4, shape = RoundedCornerShape(12.dp))
+                    Column {
+                        OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Notes") },
+                            minLines = 2, maxLines = 4, shape = RoundedCornerShape(12.dp))
+                        Box(Modifier.padding(top = 4.dp)) {
+                            EmojiPickerButton { emoji -> notes += emoji }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
                         TextButton(onClick = { cancelPin() }) { Text("Cancel") }
                         TextButton(onClick = { savePin(ll, name.trim(), notes.trim()) }) { Text("Save", color = Teal, fontWeight = FontWeight.Bold) }
@@ -872,8 +884,13 @@ class MainActivity : ComponentActivity() {
                     OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") },
                         singleLine = true, shape = RoundedCornerShape(12.dp))
                     Spacer(Modifier.padding(top = 8.dp))
-                    OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("Note") },
-                        minLines = 2, maxLines = 4, shape = RoundedCornerShape(12.dp))
+                    Column {
+                        OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("Note") },
+                            minLines = 2, maxLines = 4, shape = RoundedCornerShape(12.dp))
+                        Box(Modifier.padding(top = 4.dp)) {
+                            EmojiPickerButton { emoji -> note += emoji }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
                         TextButton(onClick = { tripPinDraft = null }) { Text("Cancel") }
                         TextButton(onClick = { saveTripPin(draft, name.trim(), note.trim()) }) { Text("Save", color = Teal, fontWeight = FontWeight.Bold) }

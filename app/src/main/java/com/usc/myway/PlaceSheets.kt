@@ -1,6 +1,9 @@
 // Compose bottom sheets for map markers: the normal-pin actions sheet and the rich landmark
 // (POI) details sheet. Async work (geocode, isOpen, photos) runs off the main thread.
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class
+)
 
 package com.usc.myway
 
