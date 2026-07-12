@@ -147,8 +147,12 @@ class CollectionsActivity : ComponentActivity() {
     ) {
         var menuOpen by remember { mutableStateOf(false) }
 
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface, // Changed from surfaceVariant to surface (White)
+            shadowElevation = 2.dp, // Added shadow to make it pop against the background
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.weight(1f).clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {

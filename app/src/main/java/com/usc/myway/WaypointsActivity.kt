@@ -86,7 +86,8 @@ class WaypointsActivity : ComponentActivity() {
 
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = MaterialTheme.colorScheme.surface, // Set to standard surface (White)
+            shadowElevation = 1.dp, // Add slight elevation to distinguish from background
             modifier = Modifier.fillMaxWidth().clickable(onClick = onFocus)
         ) {
             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
