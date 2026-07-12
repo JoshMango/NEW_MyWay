@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.text.InputType
 import android.util.Patterns
 import android.widget.EditText
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -63,6 +64,8 @@ class LoginActivity : ComponentActivity() {
 
     private val loading = mutableStateOf(false)
     private val errorMsg = mutableStateOf<String?>(null)
+    // Email a reset link was just requested for — non-null shows the "check your inbox" modal.
+    private val resetSentTo = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,6 +105,8 @@ class LoginActivity : ComponentActivity() {
                     onGithub = { errorMsg.value = null; githubSignIn() },
                     onRegister = { startActivity(Intent(this, RegisterActivity::class.java)) },
                     onForgotPassword = { email -> sendPasswordReset(email) },
+                    resetSentTo = resetSentTo.value,
+                    onDismissResetSent = { resetSentTo.value = null },
                 )
             }
         }
@@ -133,11 +138,13 @@ class LoginActivity : ComponentActivity() {
             .show()
     }
 
-    // Always shows the same message whether or not the account exists, so a bad actor can't
-    // use this to enumerate registered emails.
+    // Confirms the same way whether or not the account exists, so a bad actor can't use this
+    // to enumerate registered emails.
     private fun sendPasswordReset(email: String) {
+        loading.value = true
         auth.sendPasswordResetEmail(email).addOnCompleteListener {
-            Toast.makeText(this, "If an account exists for $email, a reset link has been sent.", Toast.LENGTH_LONG).show()
+            loading.value = false
+            resetSentTo.value = email
         }
     }
 
@@ -283,6 +290,8 @@ fun LoginScreen(
     onGithub: () -> Unit,
     onRegister: () -> Unit,
     onForgotPassword: (String) -> Unit,
+    resetSentTo: String?,
+    onDismissResetSent: () -> Unit,
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -371,35 +380,96 @@ fun LoginScreen(
     if (showForgot) {
         ForgotPasswordDialog(
             initialEmail = email,
+            loading = loading,
             onDismiss = { showForgot = false },
             onSend = { onForgotPassword(it); showForgot = false },
         )
     }
+
+    resetSentTo?.let { ResetSentDialog(it, onDismissResetSent) }
 }
 
 @Composable
-private fun ForgotPasswordDialog(initialEmail: String, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+private fun ForgotPasswordDialog(
+    initialEmail: String,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit,
+) {
     var email by remember { mutableStateOf(initialEmail) }
+    val valid = Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Reset password") },
+        shape = RoundedCornerShape(24.dp),
+        icon = { Text("🔑", fontSize = 32.sp) },
+        title = { Text("Reset your password", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
         text = {
-            Column {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Enter your account email and we'll send you a link to reset your password.",
-                    fontSize = 13.sp,
+                    "Enter the email you signed up with. We'll send you a link to set a new password.",
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
-                Spacer(Modifier.height(12.dp))
-                AuthTextField(value = email, onValueChange = { email = it }, label = "Email", keyboardType = KeyboardType.Email)
+                Spacer(Modifier.height(20.dp))
+                AuthTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = "Email",
+                    keyboardType = KeyboardType.Email,
+                    enabled = !loading,
+                )
             }
         },
         confirmButton = {
-            TextButton(
+            Button(
                 onClick = { onSend(email.trim()) },
-                enabled = Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches(),
-            ) { Text("Send") }
+                enabled = valid && !loading,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+            ) {
+                if (loading) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
+                else Text("Send reset link", fontWeight = FontWeight.Bold)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ResetSentDialog(email: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        icon = { Text("📬", fontSize = 32.sp) },
+        title = { Text("Check your inbox", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "If an account exists for",
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Text(email, fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 6.dp))
+                Text(
+                    "we've sent it a link to reset the password. The link expires in 1 hour — check your spam folder if it doesn't arrive.",
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+            ) { Text("Got it", fontWeight = FontWeight.Bold) }
+        },
     )
 }
