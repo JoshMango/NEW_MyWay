@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.util.Patterns
 import android.widget.EditText
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -99,6 +101,7 @@ class LoginActivity : ComponentActivity() {
                     onGoogle = { errorMsg.value = null; googleLauncher.launch(googleClient.signInIntent) },
                     onGithub = { errorMsg.value = null; githubSignIn() },
                     onRegister = { startActivity(Intent(this, RegisterActivity::class.java)) },
+                    onForgotPassword = { email -> sendPasswordReset(email) },
                 )
             }
         }
@@ -128,6 +131,14 @@ class LoginActivity : ComponentActivity() {
             .setPositiveButton("Resend") { _, _ -> user?.sendEmailVerification() }
             .setNegativeButton("OK", null)
             .show()
+    }
+
+    // Always shows the same message whether or not the account exists, so a bad actor can't
+    // use this to enumerate registered emails.
+    private fun sendPasswordReset(email: String) {
+        auth.sendPasswordResetEmail(email).addOnCompleteListener {
+            Toast.makeText(this, "If an account exists for $email, a reset link has been sent.", Toast.LENGTH_LONG).show()
+        }
     }
 
     // ── GitHub (Firebase-hosted OAuth, no extra SDK) ──────────────────────────────
@@ -271,11 +282,13 @@ fun LoginScreen(
     onGoogle: () -> Unit,
     onGithub: () -> Unit,
     onRegister: () -> Unit,
+    onForgotPassword: (String) -> Unit,
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var emailErr by remember { mutableStateOf<String?>(null) }
     var passErr by remember { mutableStateOf<String?>(null) }
+    var showForgot by remember { mutableStateOf(false) }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -310,6 +323,9 @@ fun LoginScreen(
                 error = passErr,
                 enabled = !loading,
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { showForgot = true }, enabled = !loading) { Text("Forgot password?") }
+            }
 
             error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp,
@@ -351,4 +367,39 @@ fun LoginScreen(
             }
         }
     }
+
+    if (showForgot) {
+        ForgotPasswordDialog(
+            initialEmail = email,
+            onDismiss = { showForgot = false },
+            onSend = { onForgotPassword(it); showForgot = false },
+        )
+    }
+}
+
+@Composable
+private fun ForgotPasswordDialog(initialEmail: String, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+    var email by remember { mutableStateOf(initialEmail) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset password") },
+        text = {
+            Column {
+                Text(
+                    "Enter your account email and we'll send you a link to reset your password.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(12.dp))
+                AuthTextField(value = email, onValueChange = { email = it }, label = "Email", keyboardType = KeyboardType.Email)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSend(email.trim()) },
+                enabled = Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches(),
+            ) { Text("Send") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
