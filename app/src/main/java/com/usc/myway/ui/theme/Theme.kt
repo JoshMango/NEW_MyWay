@@ -6,6 +6,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import com.usc.myway.App
 
 private val Teal = Color(0xFF00A77D)
 private val TealDeep = Color(0xFF00795A)
@@ -30,7 +32,7 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun MyWayTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = (LocalContext.current.applicationContext as? App)?.isDarkMode() ?: isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(

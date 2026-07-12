@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
 
     private val placeCache = HashMap<String, Place>()
     private val photoCache = HashMap<String, Bitmap>()
+    private val iconCache = HashMap<String, Bitmap>() // for landmarks
     private val isOpenCache = HashMap<String, Boolean>()
 
     private var savedLat = 0.0
@@ -245,7 +246,7 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
         setupLocationRequest()
 
-        sidebar.darkMode = isDarkMode(); sidebar.tracking = true
+        sidebar.darkMode = app.isDarkMode(); sidebar.tracking = true
         // Drawer profile header — tag/photo/banner from cache instantly; name from a one-shot profile fetch.
         loadSidebarProfile()
         if (myUid.isNotEmpty()) Profiles.fetchProfile(myUid) { p ->
@@ -267,7 +268,7 @@ class MainActivity : ComponentActivity() {
         }
         if (myUid.isNotEmpty()) { app.bindUser(myUid); NotificationHub.start(this, myUid); FcmTokens.register(myUid) }
 
-        setContent { MyWayTheme(darkTheme = isDarkMode()) { MainScreen() } }
+        setContent { MyWayTheme { MainScreen() } }
     }
 
     override fun onStart() {
@@ -331,7 +332,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun MainScreen() {
-        val dark = isDarkMode()
+        val dark = app.isDarkMode()
         val cam = rememberCameraPositionState { position = CameraPosition.fromLatLngZoom(LatLng(0.0, 0.0), 2f) }
         val scope = rememberCoroutineScope()
         camState = cam
@@ -1210,7 +1211,7 @@ class MainActivity : ComponentActivity() {
         val map = googleMap ?: return
         if (currentTripGid == null) { tripLayer.clear(); return }
         tripLayer.renderMembers(map, tripMembers, myUid)
-        tripLayer.renderPins(map, tripPins, isDarkMode())
+        tripLayer.renderPins(map, tripPins, app.isDarkMode())
     }
 
     private fun leaveTrip() {
@@ -1513,7 +1514,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleTheme() {
-        AppCompatDelegate.setDefaultNightMode(if (isDarkMode()) AppCompatDelegate.MODE_NIGHT_NO else AppCompatDelegate.MODE_NIGHT_YES)
+        val newMode = !app.isDarkMode()
+        app.setDarkMode(newMode)
+        AppCompatDelegate.setDefaultNightMode(
+            if (newMode) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+        )
         recreate()
     }
 
@@ -1530,10 +1535,4 @@ class MainActivity : ComponentActivity() {
     private fun refresh() { refreshKey++ }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
-
-    private fun isDarkMode(): Boolean = when (AppCompatDelegate.getDefaultNightMode()) {
-        AppCompatDelegate.MODE_NIGHT_YES -> true
-        AppCompatDelegate.MODE_NIGHT_NO -> false
-        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-    }
 }
