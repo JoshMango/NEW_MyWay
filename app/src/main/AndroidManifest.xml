@@ -29,6 +29,12 @@
             android:name=".WaypointsActivity"
             android:exported="false" />
         <activity
+            android:name=".MessagesActivity"
+            android:exported="false" />
+        <activity
+            android:name=".PrivateChatActivity"
+            android:exported="false" />
+        <activity
             android:name=".SettingsActivity"
             android:exported="false" />
         <activity

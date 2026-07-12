@@ -1,6 +1,7 @@
 // Social hub: find people by @tag, send/accept friend requests, manage friends.
 package com.usc.myway
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -127,6 +128,15 @@ class FriendsActivity : ComponentActivity() {
             busy(friend.uid, true)
             Friends.removeFriend(uid, friend.uid) { busy(friend.uid, false) }
         }
+
+        override fun onMessage(friend: UserHit) {
+            val chatId = PrivateMessages.pairId(uid, friend.uid)
+            startActivity(Intent(this@FriendsActivity, PrivateChatActivity::class.java).apply {
+                putExtra("chatId", chatId)
+                putExtra("otherUid", friend.uid)
+                putExtra("otherTag", friend.tag)
+            })
+        }
     }
 }
 
@@ -137,6 +147,7 @@ interface FriendsActions {
     fun onDecline(req: FriendRequest)
     fun onCancel(req: FriendRequest)
     fun onRemove(friend: UserHit)
+    fun onMessage(friend: UserHit)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -206,7 +217,7 @@ private fun FindTab(s: FriendsState, actions: FriendsActions) {
                         hit = hit,
                         trailing = {
                             when {
-                                hit.uid in friendUids -> Label("Friends", Teal)
+                                hit.uid in friendUids -> ActionButton("Message", false) { actions.onMessage(hit) }
                                 incoming != null -> ActionButton("Accept", s.busy.contains(incoming.id)) { actions.onAccept(incoming) }
                                 hit.uid in requestedUids -> Label("Requested", MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                                 else -> ActionButton("Add", s.busy.contains(hit.uid)) { actions.onSend(hit) }
@@ -259,11 +270,14 @@ private fun FriendsTab(s: FriendsState, actions: FriendsActions) {
             UserRow(
                 hit = f,
                 trailing = {
-                    OutlinedButton(
-                        onClick = { actions.onRemove(f) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
-                    ) { Text("Remove") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ActionButton("Message", false) { actions.onMessage(f) }
+                        OutlinedButton(
+                            onClick = { actions.onRemove(f) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
+                        ) { Text("Remove") }
+                    }
                 },
             )
         }
