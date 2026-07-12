@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
@@ -199,6 +200,7 @@ class CollectionsActivity : ComponentActivity() {
     private fun EditCollectionDialog(c: Collection?, onDismiss: () -> Unit) {
         var name by remember { mutableStateOf(c?.name ?: "") }
         var icon by remember { mutableStateOf(c?.icon ?: "📁") }
+        var customIcon by remember { mutableStateOf("") }
         val icons = listOf("📁", "🗺️", "🏠", "🍕", "🌳", "🏢", "✈️", "🏖️", "🏔️", "❤️")
 
         AlertDialog(
@@ -216,17 +218,44 @@ class CollectionsActivity : ComponentActivity() {
                     )
                     
                     Column {
-                        Text("Icon", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        Text("Choose Icon", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             icons.forEach { i ->
                                 Box(
                                     Modifier.size(32.dp).clip(CircleShape)
                                         .background(if (icon == i) Teal.copy(alpha = 0.2f) else Color.Transparent)
-                                        .clickable { icon = i },
+                                        .clickable { icon = i; customIcon = "" },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(i, fontSize = 18.sp)
                                 }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(12.dp))
+                        
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = customIcon,
+                                onValueChange = { 
+                                    if (it.length <= 2) { // Allow emoji or short text
+                                        customIcon = it
+                                        if (it.isNotBlank()) icon = it
+                                    }
+                                },
+                                label = { Text("Custom Icon") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                placeholder = { Text("Emoji") }
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Box(
+                                Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(icon, fontSize = 24.sp)
                             }
                         }
                     }
