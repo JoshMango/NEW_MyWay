@@ -1,7 +1,7 @@
 // Social layer on Firestore: find users by @tag, send/accept friend requests, list friends.
 // Model (no cross-user writes, so it fits the "write only your own" rules):
 //   friendRequests/{from_to}  { from, fromTag, to, toTag, createdAt }
-//   friendships/{sortedPair}  { users: [a,b], tagByUid: {a:tagA, b:tagB} }
+//   friendships/{sortedPair}  { users: [a,b], tagByUid: {a:tagA, b:tagB}, closeByUid: {a:bool, b:bool} }
 // Callback-based (no coroutines-play-services dependency).
 package com.usc.myway
 
@@ -9,6 +9,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.SetOptions
 
 data class UserHit(
     val uid: String,
@@ -16,6 +17,7 @@ data class UserHit(
     val firstName: String = "",
     val lastName: String = "",
     val photo: String = "",
+    val isClose: Boolean = false,
 ) {
     val fullName: String get() = "$firstName $lastName".trim()
 }
@@ -89,6 +91,7 @@ object Friends {
             mapOf(
                 "users" to listOf(req.fromUid, req.toUid),
                 "tagByUid" to mapOf(req.fromUid to req.fromTag, req.toUid to req.toTag),
+                "closeByUid" to mapOf(req.fromUid to false, req.toUid to false),
             )
         ).addOnSuccessListener {
             db.collection("friendRequests").document(req.id).delete()
@@ -112,12 +115,48 @@ object Friends {
                     val other = users.firstOrNull { it != myUid } as? String ?: return@mapNotNull null
                     @Suppress("UNCHECKED_CAST")
                     val tags = d.get("tagByUid") as? Map<String, String>
-                    UserHit(other, tags?.get(other) ?: "friend")
+                    @Suppress("UNCHECKED_CAST")
+                    val close = d.get("closeByUid") as? Map<String, Boolean>
+                    UserHit(other, tags?.get(other) ?: "friend", isClose = close?.get(myUid) ?: false)
                 })
             }
 
     fun removeFriend(myUid: String, otherUid: String, onDone: (String?) -> Unit) {
         db.collection("friendships").document(pairId(myUid, otherUid)).delete()
             .addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
+    }
+
+    /** Mark/unmark a friend as a "Close Friend" (private to you). */
+    fun setCloseFriend(myUid: String, otherUid: String, isClose: Boolean, onDone: (String?) -> Unit) {
+        db.collection("friendships").document(pairId(myUid, otherUid))
+            .set(mapOf("closeByUid" to mapOf(myUid to isClose)), SetOptions.merge())
+            .addOnSuccessListener { onDone(null) }
+            .addOnFailureListener { onDone(it.message ?: "Failed to update") }
+    }
+
+    /** One-shot fetch of all friend UIDs. */
+    fun fetchFriendUids(myUid: String, onResult: (List<String>) -> Unit) {
+        db.collection("friendships").whereArrayContains("users", myUid).get()
+            .addOnSuccessListener { snap ->
+                onResult(snap.documents.mapNotNull { d ->
+                    (d.get("users") as? List<*>)?.firstOrNull { it != myUid } as? String
+                })
+            }
+            .addOnFailureListener { onResult(emptyList()) }
+    }
+
+    /** One-shot fetch of all Close Friend UIDs. */
+    fun fetchCloseFriendUids(myUid: String, onResult: (List<String>) -> Unit) {
+        db.collection("friendships").whereArrayContains("users", myUid).get()
+            .addOnSuccessListener { snap ->
+                onResult(snap.documents.mapNotNull { d ->
+                    val users = d.get("users") as? List<*> ?: return@mapNotNull null
+                    val other = users.firstOrNull { it != myUid } as? String ?: return@mapNotNull null
+                    @Suppress("UNCHECKED_CAST")
+                    val close = d.get("closeByUid") as? Map<String, Boolean>
+                    if (close?.get(myUid) == true) other else null
+                })
+            }
+            .addOnFailureListener { onResult(emptyList()) }
     }
 }

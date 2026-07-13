@@ -159,6 +159,10 @@ internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad:
             val cardW = textW + padH * 2
             val cardH = padV * 2 + titleH + noteH + gap
             val w = cardW + shadow * 2; val h = cardH + shadow * 2 + topPad
+			
+			if (w <= 0 || h <= 0) {
+				return BitmapDescriptorFactory.fromBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+			}
 
             val bmp = Bitmap.createBitmap(Math.ceil(w.toDouble()).toInt(), Math.ceil(h.toDouble()).toInt(), Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
