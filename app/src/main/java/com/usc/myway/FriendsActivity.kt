@@ -1,4 +1,4 @@
-// Social hub: find people by @tag, send/accept friend requests, manage friends.
+// Social hub: find people by @tag, send/accept friend requests, manage friends, and close friends.
 package com.usc.myway
 
 import android.content.Intent
@@ -21,9 +21,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,11 +36,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +62,7 @@ import kotlinx.coroutines.delay
 private val Teal = Color(0xFF00C99D)
 private val TealDeep = Color(0xFF00A77D)
 private val Danger = Color(0xFFEF4444)
+private val StarColor = Color(0xFFEAB308) // Amber for close friends star
 
 /** All social state the activity owns; the UI reads it reactively. */
 class FriendsState {
@@ -137,6 +144,23 @@ class FriendsActivity : ComponentActivity() {
                 putExtra("otherTag", friend.tag)
             })
         }
+
+        override fun onToggleClose(friend: UserHit) {
+            busy(friend.uid, true)
+            Friends.setCloseFriend(uid, friend.uid, !friend.isClose) { busy(friend.uid, false) }
+        }
+
+        override fun onSetCloseFriends(friends: List<UserHit>) {
+            val closeUids = friends.filter { it.isClose }.map { it.uid }.toSet()
+            val notCloseUids = friends.filter { !it.isClose }.map { it.uid }.toSet()
+
+            s.friends.forEach { friend ->
+                val shouldBeClose = friend.uid in closeUids
+                if (friend.isClose != shouldBeClose) {
+                    onToggleClose(friend)
+                }
+            }
+        }
     }
 }
 
@@ -148,13 +172,15 @@ interface FriendsActions {
     fun onCancel(req: FriendRequest)
     fun onRemove(friend: UserHit)
     fun onMessage(friend: UserHit)
+    fun onToggleClose(friend: UserHit)
+    fun onSetCloseFriends(friends: List<UserHit>)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FriendsScreen(s: FriendsState, actions: FriendsActions, onBack: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
-    val tabs = listOf("Find", "Requests", "Friends")
+    val tabs = listOf("Find", "Requests", "Friends", "Close Friends")
 
     Scaffold(
         topBar = {
@@ -177,7 +203,8 @@ private fun FriendsScreen(s: FriendsState, actions: FriendsActions, onBack: () -
             when (tab) {
                 0 -> FindTab(s, actions)
                 1 -> RequestsTab(s, actions)
-                else -> FriendsTab(s, actions)
+                2 -> FriendsTab(s, actions)
+                3 -> CloseFriendsTab(s, actions)
             }
         }
     }
@@ -271,6 +298,13 @@ private fun FriendsTab(s: FriendsState, actions: FriendsActions) {
                 hit = f,
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { actions.onToggleClose(f) }, enabled = !s.busy.contains(f.uid)) {
+                            Icon(
+                                imageVector = if (f.isClose) Icons.Default.Star else Icons.Outlined.StarBorder,
+                                contentDescription = "Close Friend",
+                                tint = if (f.isClose) StarColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                        }
                         ActionButton("Message", false) { actions.onMessage(f) }
                         OutlinedButton(
                             onClick = { actions.onRemove(f) },
@@ -283,6 +317,126 @@ private fun FriendsTab(s: FriendsState, actions: FriendsActions) {
         }
     }
 }
+
+// ── Close Friends tab ─────────────────────────────────────────────────────────────────
+@Composable
+private fun CloseFriendsTab(s: FriendsState, actions: FriendsActions) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selection by remember { mutableStateOf(s.friends.filter { it.isClose }.toSet()) }
+
+    val filteredFriends by remember(searchQuery, s.friends) {
+        derivedStateOf {
+            if (searchQuery.isBlank()) {
+                s.friends
+            } else {
+                s.friends.filter {
+                    it.tag.contains(searchQuery, ignoreCase = true) ||
+                    it.fullName.contains(searchQuery, ignoreCase = true)
+                }
+            }
+        }
+    }
+
+    val (closeFriends, otherFriends) = filteredFriends.partition { it in selection }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            label = { Text("Search by friend's name") },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(12.dp))
+
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            if (closeFriends.isNotEmpty()) {
+                item { SectionLabel("CLOSE FRIENDS") }
+                items(closeFriends, key = { it.uid }) { friend ->
+                    SelectableFriendRow(
+                        friend = friend,
+                        isSelected = true,
+                        onToggle = { selection = selection - friend }
+                    )
+                }
+            }
+
+            if (otherFriends.isNotEmpty()) {
+                item {
+                    if (closeFriends.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    SectionLabel("FRIENDS")
+                }
+                items(otherFriends, key = { it.uid }) { friend ->
+                    SelectableFriendRow(
+                        friend = friend,
+                        isSelected = false,
+                        onToggle = { selection = selection + friend }
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { selection = emptySet() }) {
+                Text("Clear All", color = Danger)
+            }
+            Button(
+                onClick = {
+                    val originalCloseFriends = s.friends.filter { it.isClose }.toSet()
+                    val friendsToMakeClose = selection - originalCloseFriends
+                    val friendsToRemoveFromClose = originalCloseFriends - selection
+
+                    friendsToMakeClose.forEach { actions.onToggleClose(it.copy(isClose = false)) }
+                    friendsToRemoveFromClose.forEach { actions.onToggleClose(it.copy(isClose = true)) }
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal)
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectableFriendRow(friend: UserHit, isSelected: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AvatarCircle(photo = friend.photo, fallback = friend.tag)
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("@${friend.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp)
+            if (friend.fullName.isNotBlank()) {
+                Text(friend.fullName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
+        }
+        Icon(
+            imageVector = if (isSelected) Icons.Default.Star else Icons.Outlined.StarBorder,
+            contentDescription = "Close Friend",
+            tint = if (isSelected) StarColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        )
+    }
+}
+
 
 // ── Shared bits ─────────────────────────────────────────────────────────────────
 @Composable
@@ -300,8 +454,14 @@ private fun UserRow(hit: UserHit, trailing: @Composable () -> Unit) {
             AvatarCircle(photo = hit.photo, fallback = hit.tag)
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("@${hit.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("@${hit.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    if (hit.isClose) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.Star, null, tint = StarColor, modifier = Modifier.size(14.dp))
+                    }
+                }
                 if (hit.fullName.isNotBlank()) {
                     Text(hit.fullName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }

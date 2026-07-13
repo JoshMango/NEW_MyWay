@@ -264,13 +264,13 @@ class LoginActivity : ComponentActivity() {
     // to Firestore. On network error fetchTag returns null → onboarding, whose claim is
     // idempotent, so an existing user re-claiming their own tag still succeeds.
     private fun goToMain() {
-        val user = auth.currentUser ?: run { launch(MainActivity::class.java); return }
+        val user = auth.currentUser ?: run { launch(com.usc.myway.MainActivity::class.java); return }
         val app = application as App
-        if (app.getUserTag(user.uid).isNotEmpty()) { launch(MainActivity::class.java); return }
+        if (app.getUserTag(user.uid).isNotEmpty()) { launch(com.usc.myway.MainActivity::class.java); return }
         loading.value = true
         Profiles.fetchTag(user.uid) { tag ->
             loading.value = false
-            if (tag != null) { app.setUserTag(user.uid, tag); launch(MainActivity::class.java) }
+            if (tag != null) { app.setUserTag(user.uid, tag); launch(com.usc.myway.MainActivity::class.java) }
             else launch(OnboardingActivity::class.java)
         }
     }

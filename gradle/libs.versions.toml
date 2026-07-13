@@ -14,7 +14,7 @@ playServicesMaps = "20.0.0"
 googleGmsGoogleServices = "4.4.4"
 firebaseBom = "34.15.0"
 kotlin = "2.2.10"
-composeBom = "2024.06.00"
+composeBom = "2026.06.00"
 mapsCompose = "6.4.1"
 
 [libraries]

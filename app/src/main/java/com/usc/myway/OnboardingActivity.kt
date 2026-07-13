@@ -7,7 +7,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,7 +100,6 @@ class OnboardingActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun OnboardingScreen(
     claiming: Boolean,

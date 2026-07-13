@@ -20,6 +20,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -38,15 +39,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -263,7 +271,7 @@ class MainActivity : ComponentActivity() {
 
         // Group notifications: ask for POST_NOTIFICATIONS (13+) and start the app-wide watcher.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         if (myUid.isNotEmpty()) { app.bindUser(myUid); NotificationHub.start(this, myUid); FcmTokens.register(myUid) }
@@ -874,7 +882,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun TripPinDialog(draft: TripPinDraft) {
         var name by remember(draft) { mutableStateOf(draft.name) }
-        var note by remember(draft) { mutableStateOf(draft.note) }
+        var note by remember { mutableStateOf(draft.note) }
         Dialog(onDismissRequest = { tripPinDraft = null }) {
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(20.dp)) {
@@ -935,42 +943,92 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** Pick which groups to share your live location to (multi-select). Pre-checks current shares; empty = stop. */
+    /** Pick targeting for your live location share: groups, all friends, close friends, or individuals. */
     @Composable
     private fun LiveShareDialog() {
         var groups by remember { mutableStateOf<List<Group>?>(null) }
-        val selected = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.groups?.let { addAll(it) } } }
-        LaunchedEffect(Unit) { Groups.fetchMyGroups(myUid) { groups = it } }
+        var friends by remember { mutableStateOf<List<UserHit>?>(null) }
+        
+        // Selection state
+        val selGroups = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.groups?.let { addAll(it) } } }
+        val selUids = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.uids?.let { addAll(it) } } }
+        var allFriends by remember { mutableStateOf(liveShare?.allFriends ?: false) }
+        var closeFriends by remember { mutableStateOf(liveShare?.closeFriends ?: false) }
+
+        LaunchedEffect(Unit) { 
+            Groups.fetchMyGroups(myUid) { groups = it }
+            // One-shot fetch for friends list to populate the picker
+            val reg = Friends.listenFriends(myUid) { friends = it }
+            // Since we only need it once for the dialog, we'll keep it active while open
+        }
+
         val active = liveShare?.active == true
         val onSurface = MaterialTheme.colorScheme.onSurface
+        
         AlertDialog(
             onDismissRequest = { showLiveShareDialog = false },
             title = { Text(if (active) "Live location" else "Share live location") },
             text = {
                 Column {
-                    Text("Shares your live location for 1 hour, or until you stop. Choose groups:",
+                    Text("Choose who can see your live location for 1 hour:",
                         fontSize = 13.sp, color = onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(bottom = 10.dp))
-                    val list = groups
-                    when {
-                        list == null -> Text("Loading your groups…", color = onSurface.copy(alpha = 0.6f))
-                        list.isEmpty() -> Text("You're not in any groups yet.", color = onSurface.copy(alpha = 0.6f))
-                        else -> list.forEach { g ->
-                            val checked = g.id in selected
-                            Row(Modifier.fillMaxWidth().clickable { if (checked) selected.remove(g.id) else selected.add(g.id) }
+                    
+                    LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                        // Special Toggles
+                        item {
+                            ToggleRow("All Friends", allFriends) { allFriends = it }
+                            ToggleRow("Close Friends Only", closeFriends, isClose = true) { closeFriends = it }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = onSurface.copy(alpha = 0.08f))
+                        }
+
+                        // Groups Section
+                        item { SectionLabel("GROUPS") }
+                        val gList = groups
+                        if (gList == null) item { CenterHint("Loading groups...") }
+                        else if (gList.isEmpty()) item { CenterHint("No groups yet.") }
+                        else items(gList) { g ->
+                            val checked = g.id in selGroups
+                            Row(Modifier.fillMaxWidth().clickable { if (checked) selGroups.remove(g.id) else selGroups.add(g.id) }
                                 .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (checked) "☑" else "☐", fontSize = 18.sp, color = if (checked) Teal else onSurface.copy(alpha = 0.5f))
                                 Spacer(Modifier.width(10.dp))
                                 AvatarCircle(photo = g.photo, fallback = g.name, size = 34.dp)
                                 Spacer(Modifier.width(10.dp))
-                                Text("${g.name}  ·  ${g.members.size} member${if (g.members.size == 1) "" else "s"}",
-                                    fontSize = 15.sp, color = onSurface)
+                                Text(g.name, Modifier.weight(1f), fontSize = 15.sp, color = onSurface)
+                            }
+                        }
+
+                        // Friends Section
+                        item { Spacer(Modifier.height(12.dp)); SectionLabel("SPECIFIC FRIENDS") }
+                        val fList = friends
+                        if (fList == null) item { CenterHint("Loading friends...") }
+                        else if (fList.isEmpty()) item { CenterHint("No friends yet.") }
+                        else items(fList) { f ->
+                            val checked = f.uid in selUids
+                            Row(Modifier.fillMaxWidth().clickable { if (checked) selUids.remove(f.uid) else selUids.add(f.uid) }
+                                .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (checked) "☑" else "☐", fontSize = 18.sp, color = if (checked) Teal else onSurface.copy(alpha = 0.5f))
+                                Spacer(Modifier.width(10.dp))
+                                AvatarCircle(photo = f.photo, fallback = f.tag, size = 34.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("@${f.tag}", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = onSurface)
+                                        if (f.isClose) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Icon(Icons.Default.Star, null, tint = Color(0xFFEAB308), modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { applyLiveShare(selected.toSet()) }) {
+                TextButton(onClick = { 
+                    applyLiveShare(selGroups.toList(), allFriends, closeFriends, selUids.toList()) 
+                }) {
                     Text(if (active) "Update" else "Share", color = Teal, fontWeight = FontWeight.Bold)
                 }
             },
@@ -980,6 +1038,17 @@ class MainActivity : ComponentActivity() {
                 } else TextButton(onClick = { showLiveShareDialog = false }) { Text("Cancel") }
             },
         )
+    }
+
+    @Composable
+    private fun ToggleRow(label: String, checked: Boolean, isClose: Boolean = false, onToggle: (Boolean) -> Unit) {
+        Row(Modifier.fillMaxWidth().clickable { onToggle(!checked) }.padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(if (checked) "☑" else "☐", fontSize = 18.sp, color = if (checked) Teal else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            Spacer(Modifier.width(10.dp))
+            if (isClose) Icon(Icons.Default.Star, null, tint = Color(0xFFEAB308), modifier = Modifier.size(20.dp).padding(end = 8.dp))
+            Text(label, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        }
     }
 
     private fun saveTripPin(draft: TripPinDraft, name: String, note: String) {
@@ -1142,7 +1211,7 @@ class MainActivity : ComponentActivity() {
     private fun onMyTripChanged(gid: String?) {
         currentTripGid = gid
         tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove(); tripPlanListener?.remove()
-        tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
+        tripMembersListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
         refresh() // swap personal ↔ session pins on the map
         if (gid == null) {
             tripMembers = emptyList(); tripPins = emptyList(); tripGroupName = ""; tripGroupPhoto = ""
@@ -1455,6 +1524,7 @@ class MainActivity : ComponentActivity() {
         fusedLocClient.removeLocationUpdates(locCallBack)
     }
 
+    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
     private fun updateGPS() {
         if (hasLocationPermission()) {
             fusedLocClient.lastLocation.addOnSuccessListener(this) { it?.let(::updateUIValues) }
@@ -1501,15 +1571,30 @@ class MainActivity : ComponentActivity() {
 
     /* ── Pickers & actions ──────────────────────────────────────────────── */
 
-    /** Apply the live-share dialog's group selection: start/replace/stop and announce newly-added groups. */
-    private fun applyLiveShare(selected: Set<String>) {
+    /** Apply the live-share dialog's expanded targeting options. */
+    private fun applyLiveShare(groups: List<String>, allFriends: Boolean, closeFriends: Boolean, uids: List<String>) {
         showLiveShareDialog = false
-        val was = liveShare?.groups?.toSet() ?: emptySet()
-        if (selected.isEmpty()) { LiveShare.stop(myUid) { err -> if (err != null) toast("Couldn't stop: $err") }; return }
+        if (groups.isEmpty() && !allFriends && !closeFriends && uids.isEmpty()) { 
+            LiveShare.stop(myUid) { err -> if (err != null) toast("Couldn't stop: $err") }
+            return 
+        }
         if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
-        LiveShare.start(myUid, myTag, app.getUserPhoto(myUid), selected.toList(), savedLat, savedLng) { err ->
+        
+        LiveShare.start(
+            uid = myUid,
+            tag = myTag,
+            photo = app.getUserPhoto(myUid),
+            groups = groups,
+            allFriends = allFriends,
+            closeFriends = closeFriends,
+            uids = uids,
+            lat = savedLat,
+            lng = savedLng
+        ) { err ->
             if (err != null) { toast("Couldn't share: $err"); return@start }
-            (selected - was).forEach { gid -> Groups.postLiveShare(gid, myUid, myTag) } // announce only new groups
+            // Announce in group chats if shared to new groups
+            val was = liveShare?.groups?.toSet() ?: emptySet()
+            (groups.toSet() - was).forEach { gid -> Groups.postLiveShare(gid, myUid, myTag) }
         }
     }
 
@@ -1535,4 +1620,24 @@ class MainActivity : ComponentActivity() {
     private fun refresh() { refreshKey++ }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    private fun isDarkMode(): Boolean = when (AppCompatDelegate.getDefaultNightMode()) {
+        AppCompatDelegate.MODE_NIGHT_YES -> true
+        AppCompatDelegate.MODE_NIGHT_NO -> false
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+}
+
+@Composable
+private fun CenterHint(text: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
 }
