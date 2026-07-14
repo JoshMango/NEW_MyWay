@@ -4,6 +4,7 @@
 // chatId is pairId(uidA, uidB) — alphabetical sort of UIDs joined by underscore.
 package com.usc.myway
 
+import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -43,7 +44,8 @@ object PrivateMessages {
     fun listenMessages(chatId: String, onChange: (List<GroupMessage>) -> Unit): ListenerRegistration =
         db.collection("private_chats").document(chatId).collection("messages")
             .orderBy("ts", Query.Direction.ASCENDING)
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, err ->
+                if (err != null) Log.e("PrivateMessages", "listenMessages failed", err)
                 if (snap != null) onChange(snap.documents.map {
                     GroupMessage(it.id, it.getString("from") ?: "", it.getString("fromTag") ?: "",
                         it.getString("text") ?: "", it.getString("image") ?: "",
@@ -71,7 +73,7 @@ object PrivateMessages {
             "lastTs" to ts
         ), SetOptions.merge())
         batch.set(msgRef, msg)
-        batch.commit()
+        batch.commit().addOnFailureListener { Log.e("PrivateMessages", "sendMessage failed", it) }
     }
 
     fun sendImage(chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String, base64: String) {
@@ -90,6 +92,6 @@ object PrivateMessages {
             "lastTs" to ts
         ), SetOptions.merge())
         batch.set(msgRef, msg)
-        batch.commit()
+        batch.commit().addOnFailureListener { Log.e("PrivateMessages", "sendImage failed", it) }
     }
 }

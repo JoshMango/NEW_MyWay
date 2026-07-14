@@ -8,9 +8,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,7 +67,12 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             // Address
             Row(verticalAlignment = Alignment.Top) {
-                Text("📍", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
+                Icon(
+                    Icons.Outlined.Place,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).padding(end = 4.dp),
+                    tint = TealDeep
+                )
                 Column(Modifier.weight(1f)) {
                     Text("CURRENT LOCATION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDeep)
                     Text(state.address, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2,
@@ -73,7 +86,14 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
                     onClick = actions::onPin, shape = RoundedCornerShape(12.dp), colors = tonal,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text(if (state.pinMode) "📌 Cancel" else "📌 Pin", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                ) {
+                    Icon(
+                        if (state.pinMode) Icons.Outlined.Cancel else Icons.Outlined.PushPin,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp).padding(end = 4.dp)
+                    )
+                    Text(if (state.pinMode) "Cancel" else "Pin", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
                 val shareColors = if (state.sharingLive)
                     ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.14f), contentColor = Color(0xFFEF4444))
                 else tonal
@@ -81,7 +101,14 @@ internal fun BottomCard(state: StatsState, actions: StatsActions) {
                     onClick = actions::onShare, shape = RoundedCornerShape(12.dp), colors = shareColors,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text(if (state.sharingLive) "🔴 Live" else "📍 Share", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                ) {
+                    Icon(
+                        if (state.sharingLive) Icons.Outlined.WifiTethering else Icons.Outlined.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp).padding(end = 4.dp)
+                    )
+                    Text(if (state.sharingLive) "Live" else "Share", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             // Stats — live GPS values, hidden when tracking is off.

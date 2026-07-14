@@ -89,6 +89,19 @@ service cloud.firestore {
       allow write: if request.auth.uid == uid;
     }
 
+    // Private 1-on-1 chats — chatId is the two uids sorted and joined by "_", so the doc id already
+    // names both participants. Checking the id beats get()ing the parent: no extra read, and the
+    // first message can land in the same batch as the chat doc that would not exist yet.
+    match /private_chats/{chatId} {
+      allow read, write: if signedIn() && request.auth.uid in chatId.split('_');
+
+      match /messages/{mid} {
+        allow read:   if signedIn() && request.auth.uid in chatId.split('_');
+        allow create: if signedIn() && request.auth.uid in chatId.split('_')
+                      && request.resource.data.from == request.auth.uid;
+      }
+    }
+
     // Friend requests — sender creates; either party reads/deletes.
     match /friendRequests/{id} {
       allow create:       if signedIn() && request.resource.data.from == request.auth.uid;

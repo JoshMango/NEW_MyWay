@@ -654,7 +654,7 @@ class MainActivity : ComponentActivity() {
             var text by remember { mutableStateOf(app.locationNotes[key] ?: "") }
             AlertDialog(
                 onDismissRequest = { noteKey = null },
-                title = { Text("📝 Edit Note") },
+                title = { Text("✎ Edit Note") },
                 text = {
                     Column {
                         OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
@@ -858,12 +858,12 @@ class MainActivity : ComponentActivity() {
                         AvatarCircle(photo = pin.fromPhoto, fallback = "@${pin.fromTag}", size = 22.dp)
                         Text("Shared by @${pin.fromTag}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     }
-                    if (pin.note.isNotEmpty()) Text("📝 ${pin.note}", fontSize = 14.sp,
+                    if (pin.note.isNotEmpty()) Text("✎ ${pin.note}", fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 10.dp))
                     Spacer(Modifier.padding(top = 8.dp))
                     TripActionRow("🧭  Directions", Teal, onDirections)
-                    TripActionRow("✏️  Edit note", Teal, onEdit)
-                    TripActionRow("🗑️  Delete", Color(0xFFEF4444), onDelete)
+                    TripActionRow("✎  Edit note", Teal, onEdit)
+                    TripActionRow("🗑  Delete", Color(0xFFEF4444), onDelete)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
                         TextButton(onClick = onDismiss) { Text("Close") }
                     }
@@ -948,14 +948,14 @@ class MainActivity : ComponentActivity() {
     private fun LiveShareDialog() {
         var groups by remember { mutableStateOf<List<Group>?>(null) }
         var friends by remember { mutableStateOf<List<UserHit>?>(null) }
-        
+
         // Selection state
         val selGroups = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.groups?.let { addAll(it) } } }
         val selUids = remember { androidx.compose.runtime.mutableStateListOf<String>().apply { liveShare?.uids?.let { addAll(it) } } }
         var allFriends by remember { mutableStateOf(liveShare?.allFriends ?: false) }
         var closeFriends by remember { mutableStateOf(liveShare?.closeFriends ?: false) }
 
-        LaunchedEffect(Unit) { 
+        LaunchedEffect(Unit) {
             Groups.fetchMyGroups(myUid) { groups = it }
             // One-shot fetch for friends list to populate the picker
             val reg = Friends.listenFriends(myUid) { friends = it }
@@ -964,7 +964,7 @@ class MainActivity : ComponentActivity() {
 
         val active = liveShare?.active == true
         val onSurface = MaterialTheme.colorScheme.onSurface
-        
+
         AlertDialog(
             onDismissRequest = { showLiveShareDialog = false },
             title = { Text(if (active) "Live location" else "Share live location") },
@@ -972,7 +972,7 @@ class MainActivity : ComponentActivity() {
                 Column {
                     Text("Choose who can see your live location for 1 hour:",
                         fontSize = 13.sp, color = onSurface.copy(alpha = 0.7f), modifier = Modifier.padding(bottom = 10.dp))
-                    
+
                     LazyColumn(Modifier.heightIn(max = 400.dp)) {
                         // Special Toggles
                         item {
@@ -1026,8 +1026,8 @@ class MainActivity : ComponentActivity() {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { 
-                    applyLiveShare(selGroups.toList(), allFriends, closeFriends, selUids.toList()) 
+                TextButton(onClick = {
+                    applyLiveShare(selGroups.toList(), allFriends, closeFriends, selUids.toList())
                 }) {
                     Text(if (active) "Update" else "Share", color = Teal, fontWeight = FontWeight.Bold)
                 }
@@ -1574,12 +1574,12 @@ class MainActivity : ComponentActivity() {
     /** Apply the live-share dialog's expanded targeting options. */
     private fun applyLiveShare(groups: List<String>, allFriends: Boolean, closeFriends: Boolean, uids: List<String>) {
         showLiveShareDialog = false
-        if (groups.isEmpty() && !allFriends && !closeFriends && uids.isEmpty()) { 
+        if (groups.isEmpty() && !allFriends && !closeFriends && uids.isEmpty()) {
             LiveShare.stop(myUid) { err -> if (err != null) toast("Couldn't stop: $err") }
-            return 
+            return
         }
         if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
-        
+
         LiveShare.start(
             uid = myUid,
             tag = myTag,

@@ -17,10 +17,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.MarkEmailRead
+import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -308,12 +314,19 @@ fun LoginScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Text("MyWay", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-            Text(
-                "Find your way, together 🧭",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(top = 4.dp, bottom = 40.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp, bottom = 40.dp)) {
+                Text(
+                    "Find your way, together ",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+                Icon(
+                    Icons.Outlined.Explore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
 
             AuthTextField(
                 value = email,
@@ -402,7 +415,7 @@ private fun ForgotPasswordDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
-        icon = { Text("🔑", fontSize = 32.sp) },
+        icon = { Icon(Icons.Outlined.VpnKey, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary) },
         title = { Text("Reset your password", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -444,7 +457,7 @@ private fun ResetSentDialog(email: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(24.dp),
-        icon = { Text("📬", fontSize = 32.sp) },
+        icon = { Icon(Icons.Outlined.MarkEmailRead, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary) },
         title = { Text("Check your inbox", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

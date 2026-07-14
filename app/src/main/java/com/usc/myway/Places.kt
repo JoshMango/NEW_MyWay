@@ -38,7 +38,7 @@ object Places {
         colls(uid).addSnapshotListener { snap, _ ->
             if (snap == null) return@addSnapshotListener
             onChange(snap.documents.map { d ->
-                Coll(d.id, d.getString("name") ?: "Collection", d.getString("icon") ?: "📁",
+                Coll(d.id, d.getString("name") ?: "Collection", d.getString("icon") ?: "Folder",
                     (d.get("keys") as? List<*>)?.filterIsInstance<String>() ?: emptyList())
             })
         }

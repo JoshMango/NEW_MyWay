@@ -14,13 +14,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -74,7 +81,11 @@ fun PlanSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
             if (plan == null || plan.archived) {
-                Text("📋  Trip Plan", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Assignment, contentDescription = null, tint = TealDeep, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Trip Plan", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                }
                 if (plan?.archived == true) Text("“${plan.name}” complete — ${plan.items.size} objectives done.",
                     fontSize = 13.sp, color = onSurface.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                 else Spacer(Modifier.height(12.dp))
@@ -99,7 +110,12 @@ fun PlanSheet(
                         fontSize = 12.sp, color = if (plan.paused) Danger else onSurface.copy(alpha = 0.6f))
                 }
                 OutlinedButton(onClick = { onPause(!plan.paused) }, shape = RoundedCornerShape(20.dp)) {
-                    Text(if (plan.paused) "▶ Resume" else "⏸ Pause")
+                    Icon(
+                        if (plan.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).padding(end = 4.dp)
+                    )
+                    Text(if (plan.paused) "Resume" else "Pause")
                 }
             }
 
@@ -120,7 +136,13 @@ fun PlanSheet(
                                 color = onSurface.copy(alpha = if (item.finished) 0.5f else 1f),
                                 textDecoration = if (item.finished) TextDecoration.LineThrough else null,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (isNext && !plan.paused) Text("▶ Next stop", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep)
+                            if (isNext && !plan.paused) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, tint = TealDeep, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Next stop", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep)
+                                }
+                            }
                         }
                         if (item.finished) TextButton(onClick = { onToggle(item.id, false) }) { Text("Undo", color = TealDeep) }
                         else TextButton(onClick = { onToggle(item.id, true) }) { Text("Done", color = Teal, fontWeight = FontWeight.Bold) }
@@ -160,7 +182,8 @@ private fun AddObjectiveField(placesClient: PlacesClient, onAdd: (name: String, 
 
     OutlinedTextField(
         value = query, onValueChange = { query = it; if (picked != null) picked = null },
-        placeholder = { Text("Search a place") }, leadingIcon = { Text("🔍") },
+        placeholder = { Text("Search a place") }, 
+        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
         singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
     )
     predictions.forEach { pred ->

@@ -25,7 +25,7 @@ class MapMarkerManager(private val context: Context) {
     private var dark = false
     // User-configurable appearance (Settings screen), read from App on each refresh.
     private var pinHue = 0f
-    private var pinIcon = "📝"
+    private var pinIcon = " "
     private var pencilGlyph = "✏️"
 
     fun refresh(map: GoogleMap, app: App, dark: Boolean) {
@@ -108,7 +108,7 @@ class MapMarkerManager(private val context: Context) {
         pencilIcon ?: buildPencilBitmap(context, dark, pencilGlyph).also { pencilIcon = it }
 
     companion object {
-        private const val LABEL_ZOOM = 18f
+        private const val LABEL_ZOOM = 12f
     }
 }
 
@@ -134,7 +134,7 @@ internal fun buildPencilBitmap(ctx: Context, dark: Boolean, glyph: String = "✏
 
 /** Modern rounded note card: white pill, soft shadow, dark title, teal note. topPad reserves
  *  transparent space above the card so an anchor(0.5,0) marker sits below the map point. */
-internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean, noteIcon: String = "📝"): BitmapDescriptor {
+internal fun buildLabelBitmap(ctx: Context, title: String, note: String, topPad: Float, dark: Boolean, noteIcon: String = " "): BitmapDescriptor {
             val d = ctx.resources.displayMetrics.density
             val padH = 12 * d; val padV = 9 * d; val lineGap = 4 * d; val shadow = 6 * d; val radius = 12 * d
             val hasTitle = title.isNotEmpty()

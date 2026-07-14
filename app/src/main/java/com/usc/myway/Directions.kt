@@ -4,6 +4,12 @@
 // Requires "Routes API" enabled in the Cloud project and an unrestricted (or web-service) key.
 package com.usc.myway
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DirectionsBike
+import androidx.compose.material.icons.outlined.DirectionsBus
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.outlined.DirectionsWalk
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,11 +17,11 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-enum class TravelMode(val api: String, val label: String, val emoji: String) {
-    DRIVE("DRIVE", "Drive", "🚗"),
-    WALK("WALK", "Walk", "🚶"),
-    BICYCLE("BICYCLE", "Bike", "🚲"),
-    TRANSIT("TRANSIT", "Transit", "🚌"),
+enum class TravelMode(val api: String, val label: String, val icon: ImageVector) {
+    DRIVE("DRIVE", "Drive", Icons.Outlined.DirectionsCar),
+    WALK("WALK", "Walk", Icons.Outlined.DirectionsWalk),
+    BICYCLE("BICYCLE", "Bike", Icons.Outlined.DirectionsBike),
+    TRANSIT("TRANSIT", "Transit", Icons.Outlined.DirectionsBus),
 }
 
 data class RouteStep(
