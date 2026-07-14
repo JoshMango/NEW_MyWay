@@ -76,7 +76,7 @@ class App : Application() {
     // pinHue = BitmapDescriptorFactory hue (0=red…330=rose); pinIcon = note-card emoji; pencilIcon = collapsed-note glyph.
     fun getPinHue(): Float = prefs().getFloat(KEY_PIN_HUE, 0f)
     fun setPinHue(hue: Float) { prefs().edit().putFloat(KEY_PIN_HUE, hue).apply() }
-    fun getPinIcon(): String = prefs().getString(KEY_PIN_ICON, "📝") ?: "📝"
+    fun getPinIcon(): String = prefs().getString(KEY_PIN_ICON, "✎:") ?: "✎:"
     fun setPinIcon(icon: String) { prefs().edit().putString(KEY_PIN_ICON, icon).apply() }
     fun getPencilIcon(): String = prefs().getString(KEY_PENCIL_ICON, "✏️") ?: "✏️"
     fun setPencilIcon(icon: String) { prefs().edit().putString(KEY_PENCIL_ICON, icon).apply() }

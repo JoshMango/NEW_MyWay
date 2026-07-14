@@ -131,8 +131,8 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
 
                 Spacer(Modifier.height(14.dp))
                 SectionLabel("PLACES")
-                SbItem(Icons.Outlined.Folder, "Collections", actions::onCollections)
                 SbItem(Icons.Outlined.Place, "Waypoints", actions::onWaypoints)
+                SbItem(Icons.Outlined.Folder, "Collections", actions::onCollections)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")

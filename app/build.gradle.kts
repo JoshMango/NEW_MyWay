@@ -71,4 +71,4 @@ dependencies {
     implementation(libs.compose.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
-}
+    implementation("com.composables:icons-bootstrap-fill-android:2.2.1")}
