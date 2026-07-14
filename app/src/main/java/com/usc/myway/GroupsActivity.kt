@@ -22,11 +22,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.RadioButtonChecked
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -114,13 +120,17 @@ private fun GroupsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Groups", fontWeight = FontWeight.Bold) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold) } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showCreate = true }, containerColor = Teal) {
-                Text("+", fontSize = 28.sp, color = Color.White)
+                Icon(Icons.Default.Add, contentDescription = "Create Group", tint = Color.White)
             }
         },
     ) { pad ->
@@ -168,13 +178,17 @@ private fun GroupCard(g: Group, live: Boolean, onOpen: (Group) -> Unit) {
                         Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFEF4444))
                             .padding(horizontal = 7.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                    ) { Text("● LIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                    ) {
+                        Icon(Icons.Outlined.RadioButtonChecked, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
             Text("${g.members.size} member${if (g.members.size == 1) "" else "s"}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }
-        Text("›", fontSize = 24.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
     }
 }
 

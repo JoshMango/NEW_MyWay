@@ -35,10 +35,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.AddAPhoto
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -118,7 +128,7 @@ class GroupChatActivity : ComponentActivity() {
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
                     onJoinTrip = { joinTrip() },
-                    onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") else Groups.postSystem(gid, "👋 @$myTag left the trip") } },
+                    onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") else Groups.postSystem(gid, "Joined the trip") } },
                     onEndTrip = { Trip.endSession(gid) { err -> if (err != null) toast("Couldn't end trip: $err") } },
                     onOpenPin = { m -> openSharedPin(m) },
                     onOpenLive = { m -> startActivity(Intent(this, LiveLocationActivity::class.java).apply {
@@ -198,7 +208,7 @@ class GroupChatActivity : ComponentActivity() {
             if (err != null) toast("Couldn't join: $err")
             else {
                 TripLocationService.start(this, uid, s.group?.name ?: fallbackName)
-                Groups.postSystem(gid, "🚗 @$myTag joined the trip")
+                Groups.postSystem(gid, "@$myTag joined the trip")
                 // The trip lives on the map — go there instead of leaving the user in the chat.
                 startActivity(Intent(this, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -265,7 +275,11 @@ private fun ChatScreen(
                         Text(g?.name ?: fallbackName, fontWeight = FontWeight.Bold)
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold) } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -302,7 +316,7 @@ private fun TripBar(
         Modifier.fillMaxWidth().background(Teal.copy(alpha = 0.10f)).padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("🔴", fontSize = 14.sp)
+        Icon(Icons.Outlined.RadioButtonChecked, contentDescription = null, tint = Danger, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(8.dp))
         Text(
             if (members.isEmpty()) "Trip ongoing · nobody sharing yet" else "Trip ongoing · ${members.size} sharing location",
@@ -342,7 +356,7 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String, photos: Map
     }
     if (messages.isEmpty()) {
         Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("No messages yet. Say hi 👋", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            Text("No messages yet.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }
         return
     }
@@ -449,15 +463,28 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAva
             when {
                 isLive -> {
                     val onCard = if (mine) Color.White else MaterialTheme.colorScheme.onSurface
-                    Text("🔴 Live location", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.RadioButtonChecked, contentDescription = null, tint = if (mine) Color.White else Danger, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Live location", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
+                    }
                     Text("Tap to follow on map", fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         color = if (mine) Color.White.copy(alpha = 0.85f) else TealDeep, modifier = Modifier.padding(top = 6.dp))
                 }
                 isPin -> {
                     val onCard = if (mine) Color.White else MaterialTheme.colorScheme.onSurface
-                    Text("📍 ${m.pinName.ifEmpty { "Shared location" }}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
-                    if (m.pinNote.isNotEmpty()) Text("📝 ${m.pinNote}", fontSize = 13.sp, color = onCard.copy(alpha = 0.85f),
-                        modifier = Modifier.padding(top = 2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Place, contentDescription = null, tint = if (mine) Color.White else TealDeep, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(m.pinName.ifEmpty { "Shared location" }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = onCard)
+                    }
+                    if (m.pinNote.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                            Icon(Icons.Outlined.Description, contentDescription = null, tint = onCard.copy(alpha = 0.85f), modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(m.pinNote, fontSize = 13.sp, color = onCard.copy(alpha = 0.85f))
+                        }
+                    }
                     Text("Tap to view on map", fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         color = if (mine) Color.White.copy(alpha = 0.85f) else TealDeep, modifier = Modifier.padding(top = 6.dp))
                 }
@@ -484,7 +511,9 @@ private fun MessageInput(onSend: (String) -> Unit, onSendImage: (Uri) -> Unit) {
         Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = { pickImage.launch("image/*") }) { Text("📷", fontSize = 22.sp) }
+        IconButton(onClick = { pickImage.launch("image/*") }) { 
+            Icon(Icons.Outlined.AddAPhoto, contentDescription = "Send Photo", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
         OutlinedTextField(
             value = text, onValueChange = { text = it },
             placeholder = { Text("Message") }, modifier = Modifier.weight(1f),
@@ -544,11 +573,18 @@ private fun GroupInfoSheet(
                         onClick = { onStartTrip(); onDismiss() },
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Teal),
-                    ) { Text("🔴  Start Trip", fontWeight = FontWeight.Bold) }
+                    ) { 
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Start Trip", fontWeight = FontWeight.Bold) 
+                    }
                 } else {
-                    Text("🔴 Trip in progress — join or end it from the chat.",
-                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Icon(Icons.Outlined.RadioButtonChecked, contentDescription = null, tint = Danger, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Trip in progress — join or end it from the chat.",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
             }

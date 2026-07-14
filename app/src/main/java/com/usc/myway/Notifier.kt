@@ -38,7 +38,7 @@ object Notifier {
             NotificationCompat.CATEGORY_MESSAGE)
 
     fun trip(ctx: Context, gid: String, groupName: String) =
-        post(ctx, CH_TRIPS, ("trip:$gid").hashCode(), gid, groupName, "🔴 Trip started",
+        post(ctx, CH_TRIPS, ("trip:$gid").hashCode(), gid, groupName, "Trip started",
             "A trip just started in $groupName", NotificationCompat.CATEGORY_EVENT)
 
     /** Clear a group's message notification (called when its chat is opened). */

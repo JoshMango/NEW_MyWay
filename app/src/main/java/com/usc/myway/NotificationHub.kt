@@ -71,9 +71,9 @@ object NotificationHub {
     }
 
     private fun preview(doc: com.google.firebase.firestore.DocumentSnapshot): String = when {
-        (doc.getString("image") ?: "").isNotEmpty() -> "📷 Photo"
-        (doc.getString("liveFrom") ?: "").isNotEmpty() -> "🔴 Live location"
-        doc.getDouble("pinLat") != null -> "📍 " + (doc.getString("pinName")?.ifEmpty { "Location" } ?: "Location")
+        (doc.getString("image") ?: "").isNotEmpty() -> "Photo"
+        (doc.getString("liveFrom") ?: "").isNotEmpty() -> "Live location"
+        doc.getDouble("pinLat") != null -> (doc.getString("pinName")?.ifEmpty { "Location" } ?: "Location")
         else -> doc.getString("text") ?: ""
     }
 }

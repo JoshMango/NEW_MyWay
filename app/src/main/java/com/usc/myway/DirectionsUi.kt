@@ -21,9 +21,28 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.CallMerge
+import androidx.compose.material.icons.automirrored.outlined.Shortcut
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Directions
+import androidx.compose.material.icons.outlined.DirectionsBus
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Navigation
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.TurnLeft
+import androidx.compose.material.icons.outlined.TurnRight
+import androidx.compose.material.icons.outlined.TurnSlightLeft
+import androidx.compose.material.icons.outlined.TurnSlightRight
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,14 +93,14 @@ fun DirectionsPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(if (isPlanStop) "📋  PLAN · NEXT STOP" else if (isTripDirection) "🔴  TRIP DIRECTION" else "DIRECTIONS TO",
+                    Text(if (isPlanStop) "PLAN · NEXT STOP" else if (isTripDirection) "TRIP DIRECTION" else "DIRECTIONS TO",
                         fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = TealDeep)
                     Text(destName.ifEmpty { "Destination" }, fontSize = 19.sp, fontWeight = FontWeight.Bold,
                         color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (isTripDirection) Text(if (isPlanStop) "Part of the trip plan" else "Shared with everyone on the trip",
                         fontSize = 12.sp, color = onSurface.copy(alpha = 0.6f))
                 }
-                CircleIcon("✕", onSurface, onSurface.copy(alpha = 0.06f), onClose)
+                CircleIcon(Icons.Outlined.Close, onSurface, onSurface.copy(alpha = 0.06f), onClose)
             }
 
             // Travel-mode toggle (scrolls — 4 modes)
@@ -140,7 +160,7 @@ fun DirectionsPanel(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Text("▶", color = Color.White, fontSize = 14.sp)
+                            Icon(Icons.Outlined.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                             Text("Start", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -173,7 +193,7 @@ fun NavBanner(step: RouteStep?, distanceToNext: Int, voiceOn: Boolean, onToggleV
             Box(
                 Modifier.size(48.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center,
-            ) { Text(maneuverEmoji(step?.maneuver ?: ""), fontSize = 22.sp) }
+            ) { Icon(maneuverIcon(step?.maneuver ?: ""), contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp)) }
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 if (step != null) {
                     Text(
@@ -183,14 +203,21 @@ fun NavBanner(step: RouteStep?, distanceToNext: Int, voiceOn: Boolean, onToggleV
                     Text(step.instruction, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     laneHint(step.maneuver, distanceToNext)?.let { hint ->
-                        Text("🛣 $hint", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.padding(top = 2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                            Icon(Icons.Outlined.Directions, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text(hint, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+                        }
                     }
                 } else {
-                    Text("Arrived 🏁", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Arrived", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(Modifier.size(8.dp))
+                        Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
-            CircleIcon(if (voiceOn) "🔊" else "🔇", Color.White, Color.White.copy(alpha = 0.2f), onToggleVoice)
+            CircleIcon(if (voiceOn) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff, Color.White, Color.White.copy(alpha = 0.2f), onToggleVoice)
         }
     }
 }
@@ -227,11 +254,11 @@ fun NavFooter(route: RouteResult, currentStepIndex: Int, onExit: () -> Unit) {
 /* ── Pieces ────────────────────────────────────────────────────────────── */
 
 @Composable
-private fun CircleIcon(glyph: String, fg: Color, bg: Color, onClick: () -> Unit) {
+private fun CircleIcon(icon: ImageVector, fg: Color, bg: Color, onClick: () -> Unit) {
     Box(
         Modifier.size(38.dp).clip(CircleShape).background(bg).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(glyph, color = fg, fontSize = 16.sp) }
+    ) { Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp)) }
 }
 
 @Composable
@@ -245,7 +272,7 @@ private fun ModeChip(mode: TravelMode, selected: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(mode.emoji, fontSize = 15.sp)
+        Icon(mode.icon, contentDescription = null, tint = if (selected) Color.White else onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
         Text(mode.label, fontSize = 14.sp, fontWeight = FontWeight.Bold,
             color = if (selected) Color.White else onSurface.copy(alpha = 0.7f))
     }
@@ -273,7 +300,7 @@ private fun StepRow(step: RouteStep, last: Boolean) {
         Box(
             Modifier.size(34.dp).clip(CircleShape).background(Teal.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
-        ) { Text(maneuverEmoji(step.maneuver), fontSize = 16.sp) }
+        ) { Icon(maneuverIcon(step.maneuver), contentDescription = null, tint = Teal, modifier = Modifier.size(18.dp)) }
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(step.instruction, fontSize = 14.sp, color = onSurface, lineHeight = 19.sp)
             if (step.distanceMeters > 0 && !last) {
@@ -297,19 +324,19 @@ private fun laneHint(maneuver: String, distanceToNext: Int): String? {
     }
 }
 
-private fun maneuverEmoji(m: String): String = when {
-    m.contains("TRANSIT") -> "🚌"
-    m.contains("LEFT") && m.contains("U") -> "↩️"
-    m.contains("RIGHT") && m.contains("U") -> "↪️"
-    m.contains("LEFT") -> "⬅️"
-    m.contains("RIGHT") -> "➡️"
-    m.contains("ROUNDABOUT") || m.contains("CIRCLE") -> "🔄"
-    m.contains("MERGE") -> "🔀"
-    m.contains("FORK") -> "🍴"
-    m.contains("STRAIGHT") -> "⬆️"
-    m.contains("DEPART") || m.contains("START") -> "🚩"
-    m.contains("DESTINATION") || m.contains("ARRIVE") -> "🏁"
-    else -> "⬆️"
+private fun maneuverIcon(m: String): ImageVector = when {
+    m.contains("TRANSIT") -> Icons.Outlined.DirectionsBus
+    m.contains("LEFT") && m.contains("U") -> Icons.Outlined.Undo
+    m.contains("RIGHT") && m.contains("U") -> Icons.Outlined.Undo 
+    m.contains("LEFT") -> if (m.contains("SLIGHT")) Icons.Outlined.TurnSlightLeft else Icons.Outlined.TurnLeft
+    m.contains("RIGHT") -> if (m.contains("SLIGHT")) Icons.Outlined.TurnSlightRight else Icons.Outlined.TurnRight
+    m.contains("ROUNDABOUT") || m.contains("CIRCLE") -> Icons.Outlined.RadioButtonChecked
+    m.contains("MERGE") -> Icons.AutoMirrored.Outlined.CallMerge
+    m.contains("FORK") -> Icons.AutoMirrored.Outlined.Shortcut
+    m.contains("STRAIGHT") -> Icons.Outlined.Navigation
+    m.contains("DEPART") || m.contains("START") -> Icons.Outlined.Flag
+    m.contains("DESTINATION") || m.contains("ARRIVE") -> Icons.Outlined.CheckCircle
+    else -> Icons.Outlined.Navigation
 }
 
 private fun formatDuration(seconds: Int): String {
@@ -335,7 +362,7 @@ fun TripDirectionDialog(name: String, onTrip: () -> Unit, onMeOnly: () -> Unit, 
         confirmButton = {
             TextButton(onClick = onTrip) { Text("Set as trip direction", color = TealDeep, fontWeight = FontWeight.Bold) }
         },
-        dismissButton = { TextButton(onClick = onMeOnly) { Text("Include me only") } },
+        dismissButton = { TextButton(onClick = { onMeOnly() }) { Text("Include me only") } },
     )
 }
 
@@ -352,6 +379,6 @@ fun IncomingTripDirectionDialog(byLabel: String, byPhoto: String, destName: Stri
         },
         text = { Text("Head to ${destName.ifEmpty { "the destination" }} with the trip?") },
         confirmButton = { TextButton(onClick = onJoin) { Text("Join", color = TealDeep, fontWeight = FontWeight.Bold) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Not now") } },
     )
 }

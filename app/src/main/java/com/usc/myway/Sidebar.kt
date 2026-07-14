@@ -21,6 +21,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.ExitToApp
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -36,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -118,27 +131,27 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
 
                 Spacer(Modifier.height(14.dp))
                 SectionLabel("PLACES")
-                SbItem("📁", "Collections", actions::onCollections)
-                SbItem("📌", "Waypoints", actions::onWaypoints)
+                SbItem(Icons.Outlined.Folder, "Collections", actions::onCollections)
+                SbItem(Icons.Outlined.Place, "Waypoints", actions::onWaypoints)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")
-                SbItem("💬", "Messages", actions::onMessages)
-                SbItem("👥", "Friends", actions::onFriends)
-                SbItem("🧭", "Groups", actions::onGroups)
+                SbItem(Icons.Outlined.Chat, "Messages", actions::onMessages)
+                SbItem(Icons.Outlined.People, "Friends", actions::onFriends)
+                SbItem(Icons.Outlined.Explore, "Groups", actions::onGroups)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")
-                SbItem("⚙️", "Settings", actions::onSettings)
-                SbToggle("📡", "Tracking", state.tracking) { state.tracking = it; actions.onTrackingChanged(it) }
+                SbItem(Icons.Outlined.Settings, "Settings", actions::onSettings)
+                SbToggle(Icons.Outlined.WifiTethering, "Tracking", state.tracking) { state.tracking = it; actions.onTrackingChanged(it) }
                 SbItem(
-                    if (state.darkMode) "☀️" else "🌙",
+                    if (state.darkMode) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
                     if (state.darkMode) "Light Mode" else "Dark Mode",
                     actions::onToggleTheme,
                 )
             }
 
-            SbItem("🚪", "Log out", actions::onLogout, danger = true)
+            SbItem(Icons.Outlined.ExitToApp, "Log out", actions::onLogout, danger = true)
         }
     }
 }
@@ -153,7 +166,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun SbItem(emoji: String, label: String, onClick: () -> Unit, danger: Boolean = false) {
+private fun SbItem(icon: ImageVector, label: String, onClick: () -> Unit, danger: Boolean = false) {
     val accent = if (danger) Danger else Teal
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick)
@@ -161,7 +174,7 @@ private fun SbItem(emoji: String, label: String, onClick: () -> Unit, danger: Bo
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(38.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-            Text(emoji, fontSize = 18.sp)
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(14.dp))
         Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -170,13 +183,13 @@ private fun SbItem(emoji: String, label: String, onClick: () -> Unit, danger: Bo
 }
 
 @Composable
-private fun SbToggle(emoji: String, label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SbToggle(icon: ImageVector, label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(38.dp).clip(CircleShape).background(Teal.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-            Text(emoji, fontSize = 18.sp)
+            Icon(icon, contentDescription = null, tint = Teal, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(14.dp))
         Text(label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)

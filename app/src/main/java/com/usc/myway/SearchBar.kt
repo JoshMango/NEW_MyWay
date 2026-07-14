@@ -14,10 +14,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -101,12 +107,23 @@ internal fun SearchBar(placesClient: PlacesClient, onPicked: PlacePickedListener
             value = query,
             onValueChange = { query = it },
             placeholder = { Text("Search location…") },
-            leadingIcon = { Text("🔍", fontSize = 16.sp) },
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)) },
             trailingIcon = {
                 Row {
-                    Text("🎙️", fontSize = 16.sp, modifier = Modifier.clickable { startVoice() }.padding(8.dp))
-                    if (query.isNotEmpty()) Text("✕", modifier = Modifier
-                        .clickable { query = ""; predictions = emptyList() }.padding(8.dp))
+                    Icon(
+                        Icons.Outlined.Mic,
+                        contentDescription = "Voice search",
+                        modifier = Modifier.clickable { startVoice() }.padding(8.dp).size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    if (query.isNotEmpty()) {
+                        Icon(
+                            Icons.Outlined.Clear,
+                            contentDescription = "Clear search",
+                            modifier = Modifier.clickable { query = ""; predictions = emptyList() }.padding(8.dp).size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
                 }
             },
             singleLine = true,
