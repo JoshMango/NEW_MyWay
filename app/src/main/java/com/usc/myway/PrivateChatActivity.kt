@@ -8,9 +8,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -23,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,12 +51,12 @@ class PrivateChatActivity : ComponentActivity() {
     
     private var messages by mutableStateOf<List<GroupMessage>>(emptyList())
     private var otherPhoto by mutableStateOf("")
-    private var listener: ListenerRegistration? = null
+    private var otherTagLive by mutableStateOf("")
+    private var fullImage by mutableStateOf<String?>(null)   // base64 of a tapped image → full-screen viewer
+    private val listeners = mutableListOf<ListenerRegistration>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Profiles.fetchProfile(otherUid) { otherPhoto = it?.photo ?: "" }
-        
         setContent {
             MyWayTheme {
                 ChatScreen()
@@ -62,12 +66,14 @@ class PrivateChatActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        listener = PrivateMessages.listenMessages(chatId) { messages = it }
+        listeners += PrivateMessages.listenMessages(chatId) { messages = it }
+        // Live profile — their new photo/@tag shows in the header the moment they change it.
+        listeners += Profiles.listenProfile(otherUid) { otherPhoto = it.photo; if (it.tag.isNotEmpty()) otherTagLive = it.tag }
     }
 
     override fun onStop() {
         super.onStop()
-        listener?.remove()
+        listeners.forEach { it.remove() }; listeners.clear()
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -78,9 +84,10 @@ class PrivateChatActivity : ComponentActivity() {
                 TopAppBar(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            AvatarCircle(photo = otherPhoto, fallback = otherTag, size = 34.dp)
+                            val tag = otherTagLive.ifEmpty { otherTag }
+                            AvatarCircle(photo = otherPhoto, fallback = tag, size = 34.dp)
                             Spacer(Modifier.width(10.dp))
-                            Text("@$otherTag", fontWeight = FontWeight.Bold)
+                            Text("@$tag", fontWeight = FontWeight.Bold)
                         }
                     },
                     navigationIcon = { IconButton(onClick = { finish() }) { Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold) } }
@@ -91,6 +98,7 @@ class PrivateChatActivity : ComponentActivity() {
                 MessageList(Modifier.weight(1f))
                 MessageInput()
             }
+            fullImage?.let { FullscreenImageDialog(it) { fullImage = null } }
         }
     }
 
@@ -120,7 +128,8 @@ class PrivateChatActivity : ComponentActivity() {
                             m = m,
                             mine = m.from == uid,
                             photo = photos[m.from] ?: "",
-                            showAvatar = next == null || next.from != m.from
+                            showAvatar = next == null || next.from != m.from,
+                            isLast = i == messages.size - 1
                         )
                     }
                 }
@@ -128,27 +137,82 @@ class PrivateChatActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAvatar: Boolean) {
+    private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAvatar: Boolean, isLast: Boolean) {
+        var showMenu by remember(m.id) { mutableStateOf(false) }
+        var showEdit by remember(m.id) { mutableStateOf(false) }
+
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
             if (!mine) {
                 Box(Modifier.size(28.dp)) { if (showAvatar) AvatarCircle(photo, m.fromTag, 28.dp) }
                 Spacer(Modifier.width(6.dp))
             }
-            Column(
-                Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
-                    .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = if (m.image.isNotEmpty()) 4.dp else 12.dp, vertical = if (m.image.isNotEmpty()) 4.dp else 8.dp)
-            ) {
-                if (m.image.isNotEmpty()) {
-                    val img = remember(m.image) { decodeAvatar(m.image) }
-                    if (img != null) {
-                        Image(img, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.widthIn(max = 240.dp).heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)))
+            if (m.unsent) {
+                // Tombstone — kept in place (Messenger-style), muted italic + outlined, content gone.
+                Text(
+                    if (mine) "You unsent a message" else "@${m.fromTag} unsent a message",
+                    fontSize = 14.sp, fontStyle = FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            } else if (m.liveFrom.isNotEmpty()) {
+                // Tappable live-location card — opens the follower map (same viewer as group chat).
+                Column(
+                    Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
+                        .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable {
+                            startActivity(Intent(this@PrivateChatActivity, LiveLocationActivity::class.java)
+                                .putExtra("uid", m.liveFrom).putExtra("name", "@${m.fromTag}"))
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text("🔴 Live location", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                    Text("Tap to follow on map", fontSize = 12.sp,
+                        color = (if (mine) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.8f))
+                }
+            } else Box {
+                val isImage = m.image.isNotEmpty()
+                Column(
+                    Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
+                        // Photos render on their own with no coloured bubble behind them (that teal box was the bug).
+                        .background(if (isImage) Color.Transparent else if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
+                        // Tap an image to view it full-screen; hold your own message to edit (text only) or unsend it.
+                        .combinedClickable(
+                            onClick = { if (isImage) fullImage = m.image },
+                            onLongClick = { if (mine) showMenu = true })
+                        .padding(horizontal = if (isImage) 0.dp else 12.dp, vertical = if (isImage) 0.dp else 8.dp)
+                ) {
+                    if (m.image.isNotEmpty()) {
+                        val img = remember(m.image) { decodeAvatar(m.image) }
+                        if (img != null) {
+                            Image(img, contentDescription = null, contentScale = ContentScale.Fit,
+                                modifier = Modifier.widthIn(max = 240.dp).heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)))
+                        }
+                    } else {
+                        Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                        if (m.edited) Text("(edited)", fontSize = 11.sp, fontStyle = FontStyle.Italic,
+                            color = (if (mine) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.7f))
                     }
-                } else {
-                    Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    if (m.image.isEmpty()) DropdownMenuItem(text = { Text("Edit") }, onClick = { showMenu = false; showEdit = true })
+                    DropdownMenuItem(text = { Text("Unsend") }, onClick = { showMenu = false; PrivateMessages.unsendMessage(chatId, m.id, isLast) })
                 }
             }
+        }
+
+        if (showEdit) {
+            var draft by remember { mutableStateOf(m.text) }
+            AlertDialog(
+                onDismissRequest = { showEdit = false },
+                title = { Text("Edit message") },
+                text = { OutlinedTextField(draft, { draft = it }, modifier = Modifier.fillMaxWidth()) },
+                confirmButton = { TextButton(onClick = { PrivateMessages.editMessage(chatId, m.id, draft, isLast); showEdit = false }, enabled = draft.isNotBlank()) { Text("Save") } },
+                dismissButton = { TextButton(onClick = { showEdit = false }) { Text("Cancel") } }
+            )
         }
     }
 

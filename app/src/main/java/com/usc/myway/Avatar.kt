@@ -4,6 +4,8 @@ package com.usc.myway
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -14,7 +16,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,8 +48,11 @@ fun decodeAvatar(b64: String): ImageBitmap? =
  * Firebase Storage if image volume grows.
  */
 fun encodeImage(resolver: ContentResolver, uri: Uri, maxDim: Int, quality: Int): String {
-    val src = resolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
+    val decoded = resolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
         ?: throw IllegalStateException("decode failed")
+    // Camera photos carry an EXIF orientation flag instead of rotating the pixels; apply it here or
+    // portrait shots come out sideways (landscape) once we re-encode and drop the EXIF.
+    val src = applyExifRotation(resolver, uri, decoded)
     val longest = maxOf(src.width, src.height).coerceAtLeast(1)
     val scale = (maxDim.toFloat() / longest).coerceAtMost(1f)
     val scaled = Bitmap.createScaledBitmap(
@@ -53,6 +61,37 @@ fun encodeImage(resolver: ContentResolver, uri: Uri, maxDim: Int, quality: Int):
     val out = java.io.ByteArrayOutputStream()
     scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
     return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+}
+
+private fun applyExifRotation(resolver: ContentResolver, uri: Uri, bmp: Bitmap): Bitmap {
+    val degrees = try {
+        resolver.openInputStream(uri)?.use {
+            when (ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
+        } ?: 0f
+    } catch (_: Exception) { 0f }
+    if (degrees == 0f) return bmp
+    val m = Matrix().apply { postRotate(degrees) }
+    return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+}
+
+/**
+ * Avatar for another user, resolved live from users/{uid}. Use this in friend/member lists and chat
+ * rows so photos actually appear (list docs don't carry photos) and auto-update when the person
+ * changes their picture. [fallback] (their @tag) shows an initial until the photo loads.
+ */
+@Composable
+fun LiveAvatar(uid: String, fallback: String, size: Dp = 40.dp) {
+    var photo by remember(uid) { mutableStateOf("") }
+    androidx.compose.runtime.DisposableEffect(uid) {
+        val reg = Profiles.listenProfile(uid) { photo = it.photo }
+        onDispose { reg.remove() }
+    }
+    AvatarCircle(photo = photo, fallback = fallback, size = size)
 }
 
 @Composable

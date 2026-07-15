@@ -28,6 +28,9 @@ class TripLayer(private val context: Context) {
     /** The session-pin id a tapped marker belongs to, or null if it isn't a trip pin. */
     fun pinIdFor(marker: Marker): String? = pinIds[marker]
 
+    /** The member uid a tapped avatar marker belongs to, or null if it isn't one of ours. */
+    fun memberUidFor(marker: Marker): String? = memberMarkers.entries.firstOrNull { it.value == marker }?.key
+
     /** Diff members onto the map: move existing markers, add new, drop the ones who left. Skips me. */
     fun renderMembers(map: GoogleMap, members: List<Trip.Member>, myUid: String) {
         val seen = HashSet<String>()

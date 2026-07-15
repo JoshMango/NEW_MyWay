@@ -7,6 +7,7 @@ package com.usc.myway
 
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 
 object Profiles {
@@ -32,6 +33,21 @@ object Profiles {
     }
 
     data class Profile(val tag: String, val firstName: String, val lastName: String, val photo: String)
+
+    /** Live @tag + name + photo for a user — so chat rows/headers/cards update the moment they change. */
+    data class Live(val tag: String, val photo: String, val name: String = "")
+    fun listenProfile(uid: String, onChange: (Live) -> Unit): ListenerRegistration =
+        db.collection("users").document(uid).addSnapshotListener { d, _ ->
+            if (d != null) onChange(Live(
+                d.getString("tag") ?: "", d.getString("photo") ?: "",
+                "${d.getString("firstName") ?: ""} ${d.getString("lastName") ?: ""}".trim()))
+        }
+
+    /** Live banner (its own doc) — so a profile card reflects a banner change immediately. */
+    fun listenBanner(uid: String, onChange: (String) -> Unit): ListenerRegistration =
+        db.collection("user_banners").document(uid).addSnapshotListener { d, _ ->
+            onChange(d?.getString("banner") ?: "")
+        }
 
     /** Full profile for the settings screen. null on network error. */
     fun fetchProfile(uid: String, onResult: (Profile?) -> Unit) {

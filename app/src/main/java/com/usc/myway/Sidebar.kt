@@ -75,7 +75,6 @@ interface SidebarActions {
     fun onWaypoints()
     fun onProfile()
     fun onFriends()
-    fun onGroups()
     fun onMessages()
     fun onSettings()
     fun onToggleTheme()
@@ -138,7 +137,6 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
                 SectionLabel("SOCIAL")
                 SbItem(Icons.Outlined.Chat, "Messages", actions::onMessages)
                 SbItem(Icons.Outlined.People, "Friends", actions::onFriends)
-                SbItem(Icons.Outlined.Explore, "Groups", actions::onGroups)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")

@@ -104,8 +104,6 @@ private class ChatState {
     var messages by mutableStateOf<List<GroupMessage>>(emptyList())
     var friends by mutableStateOf<List<UserHit>>(emptyList())
     var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
-    /** uid → base64 avatar, for message bubbles and read receipts. */
-    var photos by mutableStateOf<Map<String, String>>(emptyMap())
 }
 
 class GroupChatActivity : ComponentActivity() {
@@ -149,7 +147,7 @@ class GroupChatActivity : ComponentActivity() {
         listeners += Trip.listenMembers(gid) { s.tripMembers = it }
         listeners += Groups.listenGroup(gid) { g ->
             // Group deleted, or I'm no longer a member → close the screen.
-            if (g == null || uid !in g.members) finish() else { s.group = g; loadAvatars(g.members) }
+            if (g == null || uid !in g.members) finish() else s.group = g
         }
     }
 
@@ -159,20 +157,6 @@ class GroupChatActivity : ComponentActivity() {
         if (s.group?.reads?.get(uid) == ts) return
         Groups.markRead(gid, uid, ts)
     }
-
-    // ponytail: one user-doc read per member, once per screen. Groups are small; batch with a
-    // whereIn(documentId) query if a group ever outgrows a handful of members.
-    private fun loadAvatars(members: List<String>) {
-        // My own comes from the local cache so a just-changed photo shows without a round trip.
-        if (uid !in s.photos) s.photos = s.photos + (uid to (application as App).getUserPhoto(uid))
-        for (m in members) {
-            if (m == uid || m in avatarsRequested) continue
-            avatarsRequested += m
-            Profiles.fetchProfile(m) { p -> s.photos = s.photos + (m to (p?.photo ?: "")) }
-        }
-    }
-
-    private val avatarsRequested = mutableSetOf<String>()
 
     override fun onStop() {
         super.onStop()
@@ -260,6 +244,7 @@ private fun ChatScreen(
     actions: GroupActions,
 ) {
     var showInfo by remember { mutableStateOf(false) }
+    var fullImage by remember { mutableStateOf<String?>(null) }
     val g = s.group
 
     Scaffold(
@@ -287,8 +272,8 @@ private fun ChatScreen(
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
-            MessageList(s.messages, myUid, s.photos, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
-                onOpenPin, onOpenLive, Modifier.weight(1f))
+            MessageList(s.messages, myUid, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
+                onOpenPin, onOpenLive, { fullImage = it }, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
     }
@@ -299,6 +284,7 @@ private fun ChatScreen(
             onDismiss = { showInfo = false }, onStartTrip = onJoinTrip, actions = actions,
         )
     }
+    fullImage?.let { FullscreenImageDialog(it) { fullImage = null } }
 }
 
 /** Ongoing-trip banner (rendered only while a trip is active) — Join/Leave + End, like an iPhone call bar. */
@@ -347,9 +333,10 @@ private fun TripBar(
 }
 
 @Composable
-private fun MessageList(messages: List<GroupMessage>, myUid: String, photos: Map<String, String>,
+private fun MessageList(messages: List<GroupMessage>, myUid: String,
                         reads: Map<String, Long>, tags: Map<String, String>,
-                        onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit, modifier: Modifier) {
+                        onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit,
+                        onOpenImage: (String) -> Unit, modifier: Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -381,14 +368,13 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String, photos: Map
                 if (prev == null || m.ts - prev.ts > BURST_GAP_MS) TimeSeparator(m.ts)
                 MessageBubble(
                     m, mine = m.from == myUid,
-                    photo = photos[m.from] ?: "",
                     // Avatar only on the last bubble of a run, like Messenger.
                     showAvatar = next == null || next.from != m.from,
                     onClick = { selectedId = if (selectedId == m.id) null else m.id },
-                    onOpenPin = onOpenPin, onOpenLive = onOpenLive,
+                    onOpenPin = onOpenPin, onOpenLive = onOpenLive, onOpenImage = onOpenImage,
                 )
                 if (selectedId == m.id && !m.system) MessageDetails(m, myUid, reads, tags, mine = m.from == myUid)
-                receipts[m.id]?.let { seenBy -> ReadReceipts(seenBy, photos, tags) }
+                receipts[m.id]?.let { seenBy -> ReadReceipts(seenBy, tags) }
             }
         }
     }
@@ -419,21 +405,22 @@ private fun MessageDetails(m: GroupMessage, myUid: String, reads: Map<String, Lo
 
 /** Tiny avatars under the newest message each member has seen. */
 @Composable
-private fun ReadReceipts(uids: List<String>, photos: Map<String, String>, tags: Map<String, String>) {
+private fun ReadReceipts(uids: List<String>, tags: Map<String, String>) {
     Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp),
         horizontalArrangement = Arrangement.End) {
         uids.forEach { uid ->
             Box(Modifier.padding(start = 2.dp)) {
-                AvatarCircle(photo = photos[uid] ?: "", fallback = tags[uid] ?: "?", size = 14.dp)
+                LiveAvatar(uid, tags[uid] ?: "?", 14.dp)
             }
         }
     }
 }
 
 @Composable
-private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAvatar: Boolean,
+private fun MessageBubble(m: GroupMessage, mine: Boolean, showAvatar: Boolean,
                           onClick: () -> Unit,
-                          onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit) {
+                          onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit,
+                          onOpenImage: (String) -> Unit) {
     if (m.system) {
         Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
             Text(m.text, fontSize = 12.sp, fontWeight = FontWeight.Medium,
@@ -448,15 +435,22 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAva
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         if (!mine) {
             // Reserve the gutter even on stacked bubbles so they stay aligned.
-            Box(Modifier.size(28.dp)) { if (showAvatar) AvatarCircle(photo, m.fromTag, 28.dp) }
+            Box(Modifier.size(28.dp)) { if (showAvatar) LiveAvatar(m.from, m.fromTag, 28.dp) }
             Spacer(Modifier.width(6.dp))
         }
+        val isImage = m.image.isNotEmpty()
         Column(
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
-                .background(if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
-                // Pin/live cards navigate on tap; everything else toggles its time + seen-by line.
-                .clickable { if (isPin) onOpenPin(m) else if (isLive) onOpenLive(m) else onClick() }
-                .padding(horizontal = if (m.image.isNotEmpty()) 4.dp else 12.dp, vertical = if (m.image.isNotEmpty()) 4.dp else 8.dp),
+                // Photos render on their own with no coloured bubble behind them (that teal box was the bug).
+                .background(if (isImage) Color.Transparent else if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
+                // Pin/live cards navigate, images open full-screen, everything else toggles its time + seen-by line.
+                .clickable {
+                    when {
+                        isPin -> onOpenPin(m); isLive -> onOpenLive(m)
+                        isImage -> onOpenImage(m.image); else -> onClick()
+                    }
+                }
+                .padding(horizontal = if (isImage) 0.dp else 12.dp, vertical = if (isImage) 0.dp else 8.dp),
         ) {
             if (!mine) Text("@${m.fromTag}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep,
                 modifier = Modifier.padding(horizontal = if (m.image.isNotEmpty()) 8.dp else 0.dp))
@@ -661,7 +655,7 @@ private fun MemberRow(g: Group, memberUid: String, myUid: String, iAmOwner: Bool
         // Tap the person → their profile card.
         Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { showCard = true },
             verticalAlignment = Alignment.CenterVertically) {
-            AvatarCircle(photo = "", fallback = g.tagOf(memberUid), size = 36.dp)
+            LiveAvatar(memberUid, g.tagOf(memberUid), 36.dp)
             Spacer(Modifier.width(10.dp))
             Column {
                 Text("@${g.tagOf(memberUid)}" + if (memberUid == myUid) " (you)" else "",
@@ -695,7 +689,7 @@ private fun AddMemberDialog(addable: List<UserHit>, onDismiss: () -> Unit, onPic
                             Modifier.fillMaxWidth().clickable { onPick(f) }.padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            AvatarCircle(photo = f.photo, fallback = f.tag, size = 34.dp)
+                            LiveAvatar(f.uid, f.tag, 34.dp)
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("@${f.tag}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)

@@ -52,9 +52,29 @@ object PrivateMessages {
                         it.getDouble("pinLat"), it.getDouble("pinLng"),
                         it.getString("pinName") ?: "", it.getString("pinNote") ?: "",
                         it.getString("pinPlaceId") ?: "", it.getBoolean("system") ?: false,
-                        it.getString("liveFrom") ?: "", it.getLong("ts") ?: 0L)
+                        it.getString("liveFrom") ?: "", it.getLong("ts") ?: 0L,
+                        it.getBoolean("edited") ?: false, it.getBoolean("unsent") ?: false)
                 })
             }
+
+    /** Edit a text message (author only). Refresh the inbox preview when it was the newest message. */
+    fun editMessage(chatId: String, mid: String, text: String, isLast: Boolean) {
+        val body = text.trim()
+        if (body.isEmpty()) return
+        val ref = db.collection("private_chats").document(chatId)
+        ref.collection("messages").document(mid).update("text", body, "edited", true)
+            .addOnFailureListener { Log.e("PrivateMessages", "editMessage failed", it) }
+        if (isLast) ref.update("lastMsg", body)
+    }
+
+    /** Unsend a message (author only). Soft-delete: keep the doc as a tombstone with content cleared. */
+    fun unsendMessage(chatId: String, mid: String, isLast: Boolean) {
+        val ref = db.collection("private_chats").document(chatId)
+        ref.collection("messages").document(mid).update(
+            mapOf("unsent" to true, "text" to "", "image" to "", "liveFrom" to "", "edited" to false)
+        ).addOnFailureListener { Log.e("PrivateMessages", "unsendMessage failed", it) }
+        if (isLast) ref.update("lastMsg", "Unsent a message")
+    }
 
     fun sendMessage(chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String, text: String) {
         val body = text.trim()
@@ -74,6 +94,21 @@ object PrivateMessages {
         ), SetOptions.merge())
         batch.set(msgRef, msg)
         batch.commit().addOnFailureListener { Log.e("PrivateMessages", "sendMessage failed", it) }
+    }
+
+    /** Drop a live-location card into a DM so the recipient can tap to follow the sharer's map. */
+    fun postLiveShare(chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String) {
+        val ts = System.currentTimeMillis()
+        val batch = db.batch()
+        val chatRef = db.collection("private_chats").document(chatId)
+        batch.set(chatRef, mapOf(
+            "users" to listOf(fromUid, otherUid).sorted(),
+            "tags" to mapOf(fromUid to fromTag, otherUid to otherTag),
+            "lastMsg" to "🔴 Live location", "lastTs" to ts,
+        ), SetOptions.merge())
+        batch.set(chatRef.collection("messages").document(),
+            mapOf("from" to fromUid, "fromTag" to fromTag, "text" to "", "liveFrom" to fromUid, "ts" to ts))
+        batch.commit().addOnFailureListener { Log.e("PrivateMessages", "postLiveShare failed", it) }
     }
 
     fun sendImage(chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String, base64: String) {

@@ -9,6 +9,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 
 data class Group(
     val id: String,
@@ -20,6 +21,8 @@ data class Group(
     val photo: String = "",
     val tripActive: Boolean = false,   // an ongoing trip session (joinable, marked LIVE) — survives everyone leaving
     val reads: Map<String, Long> = emptyMap(),  // uid → ts of the newest message they've seen (read receipts)
+    val lastMsg: String = "",          // inbox preview — mirrors DMs so the unified Messages list sorts/shows groups
+    val lastTs: Long = 0,              // newest message time; what the unified inbox sorts on
 ) {
     fun isAdmin(uid: String) = uid == owner || uid in admins
     fun tagOf(uid: String) = tags[uid] ?: "unknown"
@@ -40,6 +43,8 @@ data class GroupMessage(
     val system: Boolean = false,   // trip join/leave notices etc — rendered as a centered chip, not a bubble
     val liveFrom: String = "",     // uid of a live-location sharer → rendered as a tappable live card
     val ts: Long = 0,              // client millis; also what read receipts compare against
+    val edited: Boolean = false,   // author edited the text after sending → shows an "(edited)" tag (DMs)
+    val unsent: Boolean = false,   // author unsent it → tombstone bubble, content cleared (DMs)
 )
 
 object Groups {
@@ -100,6 +105,8 @@ object Groups {
             photo = d.getString("photo") ?: "",
             tripActive = d.getBoolean("tripActive") ?: false,
             reads = (d.get("reads") as? Map<String, Long>) ?: emptyMap(),
+            lastMsg = d.getString("lastMsg") ?: "",
+            lastTs = d.getLong("lastTs") ?: 0L,
         )
     }
 
@@ -162,8 +169,31 @@ object Groups {
     private fun post(gid: String, fields: Map<String, Any>) {
         // ponytail: client millis for ordering so a just-sent message doesn't jump on a null server timestamp.
         // Ceiling: cross-device clock skew can misorder near-simultaneous messages; swap to serverTimestamp if it matters.
-        db.collection("groups").document(gid).collection("messages").document()
-            .set(fields + ("ts" to System.currentTimeMillis()))
+        val ts = System.currentTimeMillis()
+        val gref = db.collection("groups").document(gid)
+        val batch = db.batch()
+        batch.set(gref.collection("messages").document(), fields + ("ts" to ts))
+        // Mirror DMs: keep an inbox preview on the group doc so the unified Messages list can sort/show it.
+        batch.set(gref, mapOf("lastMsg" to previewOf(fields), "lastTs" to ts), SetOptions.merge())
+        batch.commit()
+    }
+
+    /** One-time inbox backfill for groups created before lastMsg/lastTs existed: seed from the newest message. */
+    fun backfillPreview(gid: String) {
+        val gref = db.collection("groups").document(gid)
+        gref.collection("messages").orderBy("ts", Query.Direction.DESCENDING).limit(1).get()
+            .addOnSuccessListener { snap ->
+                val d = snap.documents.firstOrNull() ?: return@addOnSuccessListener
+                gref.set(mapOf("lastMsg" to previewOf(d.data ?: emptyMap()), "lastTs" to (d.getLong("ts") ?: 0L)), SetOptions.merge())
+            }
+    }
+
+    /** Inbox preview for a message (media get an emoji label; text is shown verbatim). */
+    private fun previewOf(f: Map<String, Any>): String = when {
+        (f["image"] as? String).orEmpty().isNotEmpty() -> "📷 Photo"
+        (f["liveFrom"] as? String).orEmpty().isNotEmpty() -> "🔴 Live location"
+        f["pinLat"] != null -> "📍 " + (f["pinName"] as? String).orEmpty().ifEmpty { "Location" }
+        else -> f["text"] as? String ?: ""
     }
 
     // ── Membership / roles ────────────────────────────────────────────────────────

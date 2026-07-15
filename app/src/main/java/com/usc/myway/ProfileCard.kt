@@ -21,7 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,19 +39,25 @@ private val TealDeep = Color(0xFF00A77D)
 /** Popup card for a user, loaded by uid. [tagHint]/[nameHint] show instantly while the fetch resolves. */
 @Composable
 fun ProfileCardDialog(uid: String, tagHint: String, nameHint: String = "", onDismiss: () -> Unit) {
-    var profile by remember(uid) { mutableStateOf<Profiles.Profile?>(null) }
+    var tag by remember(uid) { mutableStateOf(tagHint) }
+    var name by remember(uid) { mutableStateOf(nameHint) }
+    var photo by remember(uid) { mutableStateOf("") }
     var banner by remember(uid) { mutableStateOf("") }
-    LaunchedEffect(uid) {
-        Profiles.fetchProfile(uid) { profile = it }
-        Profiles.fetchBanner(uid) { banner = it }
+    // Live — the card reflects the person's picture/banner/name the moment they change any of them.
+    DisposableEffect(uid) {
+        val r1 = Profiles.listenProfile(uid) { p ->
+            if (p.tag.isNotBlank()) tag = p.tag
+            if (p.name.isNotBlank()) name = p.name
+            photo = p.photo
+        }
+        val r2 = Profiles.listenBanner(uid) { banner = it }
+        onDispose { r1.remove(); r2.remove() }
     }
-    val tag = profile?.tag?.ifBlank { tagHint } ?: tagHint
-    val name = profile?.let { "${it.firstName} ${it.lastName}".trim() }?.ifBlank { nameHint } ?: nameHint
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxWidth()) {
-                ProfileHeader(banner = banner, photo = profile?.photo ?: "", tag = tag)
+                ProfileHeader(banner = banner, photo = photo, tag = tag)
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 44.dp, bottom = 20.dp)) {
                     if (name.isNotBlank()) Text(name, fontSize = 20.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface)

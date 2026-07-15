@@ -5,6 +5,7 @@ package com.usc.myway
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,11 +74,15 @@ private fun LiveScreen(uid: String, who: String, onBack: () -> Unit) {
                     val marker = rememberMarkerState(position = pos)
                     // Follow the live position as it updates.
                     marker.position = pos
+                    val ctx = LocalContext.current
+                    val dark = isSystemInDarkTheme()
+                    // Their profile photo IS the marker (matches iOS), not a generic pin.
+                    val icon = remember(s.photo, dark) { buildAvatarMarker(ctx, s.photo, s.tag, dark) }
                     GoogleMap(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         cameraPositionState = cam,
                         uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
-                    ) { Marker(state = marker, title = who) }
+                    ) { Marker(state = marker, title = who, icon = icon) }
                     Text("🔴  Live · ${minutesLeft(s.expiresAt)} min left", fontSize = 14.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(16.dp))
                 }

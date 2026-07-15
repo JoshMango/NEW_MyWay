@@ -424,7 +424,7 @@ private fun SelectableFriendRow(friend: UserHit, isSelected: Boolean, onToggle: 
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AvatarCircle(photo = friend.photo, fallback = friend.tag)
+        LiveAvatar(friend.uid, friend.tag)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text("@${friend.tag}", fontWeight = FontWeight.Medium, fontSize = 15.sp)
@@ -454,7 +454,7 @@ private fun UserRow(hit: UserHit, trailing: @Composable () -> Unit) {
         // Tapping the person (avatar + name) opens their profile card.
         Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { showCard = true },
             verticalAlignment = Alignment.CenterVertically) {
-            AvatarCircle(photo = hit.photo, fallback = hit.tag)
+            LiveAvatar(hit.uid, hit.tag)
             Spacer(Modifier.width(12.dp))
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {

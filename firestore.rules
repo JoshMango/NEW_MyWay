@@ -53,6 +53,10 @@ service cloud.firestore {
         allow create: if member(gid)
                       && (request.resource.data.from == request.auth.uid
                           || request.resource.data.get('system', false) == true);
+        // Authors may edit/unsend their own messages (from must stay themselves).
+        allow update: if member(gid) && resource.data.from == request.auth.uid
+                      && request.resource.data.from == request.auth.uid;
+        allow delete: if member(gid) && resource.data.from == request.auth.uid;
       }
 
       // Shared trip pins — any member may add/edit/delete.
@@ -93,12 +97,22 @@ service cloud.firestore {
     // names both participants. Checking the id beats get()ing the parent: no extra read, and the
     // first message can land in the same batch as the chat doc that would not exist yet.
     match /private_chats/{chatId} {
-      allow read, write: if signedIn() && request.auth.uid in chatId.split('_');
+      // create keys off the doc id (the doc doesn't exist yet, so there's no resource.data to read).
+      allow create:       if signedIn() && request.auth.uid in chatId.split('_');
+      // read/update key off the `users` field so COLLECTION QUERIES work — an id-based rule
+      // (chatId.split) only works for direct gets, not list queries, which left the inbox empty.
+      allow read, update: if signedIn() && request.auth.uid in resource.data.users;
 
       match /messages/{mid} {
         allow read:   if signedIn() && request.auth.uid in chatId.split('_');
         allow create: if signedIn() && request.auth.uid in chatId.split('_')
                       && request.resource.data.from == request.auth.uid;
+        // Authors may edit/unsend their own messages (from must stay themselves).
+        allow update: if signedIn() && request.auth.uid in chatId.split('_')
+                      && resource.data.from == request.auth.uid
+                      && request.resource.data.from == request.auth.uid;
+        allow delete: if signedIn() && request.auth.uid in chatId.split('_')
+                      && resource.data.from == request.auth.uid;
       }
     }
 

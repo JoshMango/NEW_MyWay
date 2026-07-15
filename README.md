@@ -60,7 +60,7 @@ app/src/main/
 │   ├── ProfileActivity.kt / ProfileCard.kt      # Profile settings + reusable Discord-style card
 │   ├── Avatar.kt                                # AvatarCircle, base64 image encode/decode
 │   ├── FriendsActivity.kt / Friends.kt          # Find friends by @tag, requests, friendships
-│   ├── GroupsActivity.kt / Groups.kt            # Group list + Firestore group/chat helpers
+│   ├── Groups.kt                                # Firestore group + group-chat helpers
 │   ├── GroupChatActivity.kt                     # Group chat, images, info sheet (roles/roster)
 │   ├── Trip.kt / TripArrows.kt                  # Group Trips (live location, session pins, offers)
 │   ├── TripLocationService.kt                   # Foreground location publisher (heartbeat/TTL)

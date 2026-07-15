@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
 
     private val markers = MapMarkerManager(this)
     private val tripLayer = TripLayer(this)
+    private val liveLayer = TripLayer(this)   // incoming live-location sharers, as avatar markers (separate marker set)
     private var googleMap: GoogleMap? = null
     private var camState: CameraPositionState? = null
     private var uiScope: CoroutineScope? = null
@@ -182,6 +183,7 @@ class MainActivity : ComponentActivity() {
     private var directionChoice by mutableStateOf<Pair<LatLng, String>?>(null) // pending "trip vs me only" prompt
     private var incomingTripDest by mutableStateOf<Trip.TripDest?>(null)        // someone else set a trip direction → offer to join
     private var showTripRoster by mutableStateOf(false)                         // tapping the live-trip bar → who's here
+    private var confirmEndTrip by mutableStateOf(false)                         // "End trip for everyone" confirmation
     // Live navigation
     private var navigating by mutableStateOf(false)
     private var currentStepIndex by mutableIntStateOf(0)
@@ -212,6 +214,8 @@ class MainActivity : ComponentActivity() {
     // Live location share (Messenger-style) — one live_shares/{myUid} doc, independent of trips.
     private var liveShareListener: ListenerRegistration? = null
     private var liveShare by mutableStateOf<LiveShare.State?>(null)
+    private var visibleSharesListener: ListenerRegistration? = null
+    private var livePeers = emptyList<LiveShare.State>()   // people currently sharing their live location with me
     private var showLiveShareDialog by mutableStateOf(false)
     private var tripGroupName by mutableStateOf("")
     private var tripGroupPhoto by mutableStateOf("")
@@ -284,6 +288,7 @@ class MainActivity : ComponentActivity() {
         if (myUid.isNotEmpty()) {
             myTripListener = Trip.listenMyTrip(myUid) { gid -> onMyTripChanged(gid) }
             liveShareListener = LiveShare.listen(myUid) { onLiveShareChanged(it) }
+            visibleSharesListener = LiveShare.listenVisible(myUid) { livePeers = it; renderLivePeers() }
         }
     }
 
@@ -292,6 +297,8 @@ class MainActivity : ComponentActivity() {
         myTripListener?.remove(); tripMembersListener?.remove(); tripPinsListener?.remove(); tripDestListener?.remove(); tripOffersListener?.remove(); tripPlanListener?.remove()
         myTripListener = null; tripMembersListener = null; tripPinsListener = null; tripDestListener = null; tripOffersListener = null; tripPlanListener = null
         liveShareListener?.remove(); liveShareListener = null
+        visibleSharesListener?.remove(); visibleSharesListener = null
+        googleMap?.let { liveLayer.clear() }
     }
 
     private fun onLiveShareChanged(s: LiveShare.State?) {
@@ -786,6 +793,25 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 confirmButton = { TextButton(onClick = { showTripRoster = false }) { Text("Close") } },
+                // End for everyone lives here too (not just in the group chat) so you can end from the map.
+                dismissButton = {
+                    TextButton(onClick = { showTripRoster = false; confirmEndTrip = true }) {
+                        Text("End trip", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    }
+                },
+            )
+        }
+        if (confirmEndTrip) {
+            AlertDialog(
+                onDismissRequest = { confirmEndTrip = false },
+                title = { Text("End trip?", fontWeight = FontWeight.Bold) },
+                text = { Text("This ends the trip for everyone and deletes all shared pins and notes from the session. This can't be undone.") },
+                confirmButton = {
+                    TextButton(onClick = { confirmEndTrip = false; endTrip() }) {
+                        Text("End trip", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmEndTrip = false }) { Text("Cancel") } },
             )
         }
         incomingTripDest?.let { dest ->
@@ -1009,7 +1035,7 @@ class MainActivity : ComponentActivity() {
                                 .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (checked) "☑" else "☐", fontSize = 18.sp, color = if (checked) Teal else onSurface.copy(alpha = 0.5f))
                                 Spacer(Modifier.width(10.dp))
-                                AvatarCircle(photo = f.photo, fallback = f.tag, size = 34.dp)
+                                LiveAvatar(f.uid, f.tag, 34.dp)
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1027,7 +1053,18 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    applyLiveShare(selGroups.toList(), allFriends, closeFriends, selUids.toList())
+                    // Build visibleTo (group members + picked/close/all friends) so recipients' maps discover
+                    // the marker — an empty visibleTo is why sharing never reached anyone before.
+                    val gById = groups?.associateBy { it.id } ?: emptyMap()
+                    val fList = friends ?: emptyList()
+                    val picked = fList.filter { it.uid in selUids }
+                    val visible = buildSet {
+                        selGroups.forEach { gid -> gById[gid]?.members?.forEach { if (it != myUid) add(it) } }
+                        addAll(selUids)
+                        if (allFriends) fList.forEach { add(it.uid) }
+                        if (closeFriends) fList.filter { it.isClose }.forEach { add(it.uid) }
+                    }.toList()
+                    applyLiveShare(selGroups.toList(), allFriends, closeFriends, picked, visible)
                 }) {
                     Text(if (active) "Update" else "Share", color = Teal, fontWeight = FontWeight.Bold)
                 }
@@ -1065,7 +1102,6 @@ class MainActivity : ComponentActivity() {
         override fun onWaypoints() { drawerOpen = false; startActivity(Intent(this@MainActivity, WaypointsActivity::class.java)) }
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
-        override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, GroupsActivity::class.java)) }
         override fun onMessages() { drawerOpen = false; startActivity(Intent(this@MainActivity, MessagesActivity::class.java)) }
         override fun onSettings() { drawerOpen = false; startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
@@ -1081,6 +1117,13 @@ class MainActivity : ComponentActivity() {
     /* ── Map interaction ────────────────────────────────────────────────── */
 
     private fun handleMarkerClick(m: Marker) {
+        // Tapping a live-share avatar opens the follower map for that person.
+        liveLayer.memberUidFor(m)?.let { uid ->
+            val peer = livePeers.firstOrNull { it.uid == uid }
+            startActivity(Intent(this, LiveLocationActivity::class.java)
+                .putExtra("uid", uid).putExtra("name", "@${peer?.tag ?: ""}"))
+            return
+        }
         tripLayer.pinIdFor(m)?.let { id ->
             tripPins.firstOrNull { it.id == id }?.let { centerOn(m.position); activeSheet = ActiveSheet.TripPinActions(it) }
             return
@@ -1198,6 +1241,17 @@ class MainActivity : ComponentActivity() {
     private fun refreshMap(map: GoogleMap, dark: Boolean) {
         if (currentTripGid == null) markers.refresh(map, app, dark) else markers.clear()
         renderTrip()
+        renderLivePeers()
+    }
+
+    /** Draw everyone currently sharing their live location with me as circular avatar markers (like iOS). */
+    private fun renderLivePeers() {
+        val map = googleMap ?: return
+        val onTrip = tripMembers.map { it.uid }.toSet()   // don't double-draw someone already on my trip
+        val members = livePeers
+            .filter { it.uid != myUid && it.lat != null && it.lng != null && it.uid !in onTrip }
+            .map { Trip.Member(it.uid, it.tag, it.photo, it.lat, it.lng) }
+        liveLayer.renderMembers(map, members, myUid)
     }
 
     private fun openTripChat() {
@@ -1281,6 +1335,7 @@ class MainActivity : ComponentActivity() {
         if (currentTripGid == null) { tripLayer.clear(); return }
         tripLayer.renderMembers(map, tripMembers, myUid)
         tripLayer.renderPins(map, tripPins, app.isDarkMode())
+        renderLivePeers()   // re-dedup against the updated trip roster
     }
 
     private fun leaveTrip() {
@@ -1289,6 +1344,15 @@ class MainActivity : ComponentActivity() {
         if (uid.isNotEmpty()) Trip.leave(uid) { err ->
             if (err != null) toast("Couldn't leave: $err")
             else gid?.let { Groups.postSystem(it, "👋 @$myTag left the trip") }
+        }
+    }
+
+    /** End the whole session for everyone (any member may) — mirrors the group chat's End button. */
+    private fun endTrip() {
+        val gid = currentTripGid ?: return
+        Trip.endSession(gid) { err ->
+            if (err != null) toast("Couldn't end trip: $err")
+            else Groups.postSystem(gid, "🏁 @$myTag ended the trip")
         }
     }
 
@@ -1572,14 +1636,17 @@ class MainActivity : ComponentActivity() {
     /* ── Pickers & actions ──────────────────────────────────────────────── */
 
     /** Apply the live-share dialog's expanded targeting options. */
-    private fun applyLiveShare(groups: List<String>, allFriends: Boolean, closeFriends: Boolean, uids: List<String>) {
+    private fun applyLiveShare(groups: List<String>, allFriends: Boolean, closeFriends: Boolean, friends: List<UserHit>, visibleTo: List<String>) {
         showLiveShareDialog = false
+        val uids = friends.map { it.uid }
         if (groups.isEmpty() && !allFriends && !closeFriends && uids.isEmpty()) {
             LiveShare.stop(myUid) { err -> if (err != null) toast("Couldn't stop: $err") }
             return
         }
         if (savedLat == 0.0 && savedLng == 0.0) { toast("Waiting for your location…"); return }
 
+        val wasGroups = liveShare?.groups?.toSet() ?: emptySet()
+        val wasUids = liveShare?.uids?.toSet() ?: emptySet()
         LiveShare.start(
             uid = myUid,
             tag = myTag,
@@ -1588,13 +1655,16 @@ class MainActivity : ComponentActivity() {
             allFriends = allFriends,
             closeFriends = closeFriends,
             uids = uids,
+            visibleTo = visibleTo,
             lat = savedLat,
             lng = savedLng
         ) { err ->
             if (err != null) { toast("Couldn't share: $err"); return@start }
-            // Announce in group chats if shared to new groups
-            val was = liveShare?.groups?.toSet() ?: emptySet()
-            (groups.toSet() - was).forEach { gid -> Groups.postLiveShare(gid, myUid, myTag) }
+            // Drop a tappable live card into each newly-targeted group chat and friend DM.
+            (groups.toSet() - wasGroups).forEach { gid -> Groups.postLiveShare(gid, myUid, myTag) }
+            friends.filter { it.uid !in wasUids }.forEach { f ->
+                PrivateMessages.postLiveShare(PrivateMessages.pairId(myUid, f.uid), myUid, myTag, f.uid, f.tag)
+            }
         }
     }
 

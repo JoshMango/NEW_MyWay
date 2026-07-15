@@ -4,11 +4,15 @@ package com.usc.myway
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.util.Base64
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
@@ -113,6 +117,39 @@ class MapMarkerManager(private val context: Context) {
 }
 
 /* Note bitmaps — top-level so both MapMarkerManager (personal) and TripLayer (session) render identical labels. */
+
+/** Circular profile-photo marker (or a teal initial tile) — used for live-location sharers, like iOS. */
+internal fun buildAvatarMarker(ctx: Context, photoB64: String, tag: String, dark: Boolean): BitmapDescriptor {
+    val d = ctx.resources.displayMetrics.density
+    val size = (48 * d).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val cx = size / 2f
+    val ring = Paint(Paint.ANTI_ALIAS_FLAG)
+    ring.color = if (dark) 0xFF243244.toInt() else Color.WHITE
+    ring.setShadowLayer(4 * d, 0f, 1 * d, 0x55000000)
+    c.drawCircle(cx, cx, cx - 4 * d, ring)               // white ring + soft shadow
+    val inner = cx - 7 * d
+    val photo = try {
+        if (photoB64.isBlank()) null
+        else Base64.decode(photoB64, Base64.NO_WRAP).let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+    } catch (_: Exception) { null }
+    if (photo != null) {
+        c.save(); c.clipPath(Path().apply { addCircle(cx, cx, inner, Path.Direction.CW) })
+        c.drawBitmap(photo, Rect(0, 0, photo.width, photo.height),
+            RectF(cx - inner, cx - inner, cx + inner, cx + inner),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        c.restore()
+    } else {
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG); bg.color = 0xFF00C99D.toInt()
+        c.drawCircle(cx, cx, inner, bg)
+        val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+        tp.color = Color.WHITE; tp.textSize = 20 * d; tp.textAlign = Paint.Align.CENTER; tp.typeface = Typeface.DEFAULT_BOLD
+        val fm = tp.fontMetrics
+        c.drawText(tag.take(1).uppercase().ifBlank { "?" }, cx, cx - (fm.ascent + fm.descent) / 2f, tp)
+    }
+    return BitmapDescriptorFactory.fromBitmap(bmp)
+}
 
 /** Small circle with a pencil — the collapsed state of a note. */
 internal fun buildPencilBitmap(ctx: Context, dark: Boolean, glyph: String = "✏️"): BitmapDescriptor {
