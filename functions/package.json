@@ -1,6 +1,6 @@
 {
   "name": "myway-functions",
-  "description": "Cloud Functions for MyWay push notifications (group messages + trip start).",
+  "description": "Cloud Functions for MyWay push notifications (group messages, trip start, scheduled-trip reminders).",
   "main": "index.js",
   "engines": {
     "node": "20"

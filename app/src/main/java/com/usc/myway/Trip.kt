@@ -101,6 +101,18 @@ object Trip {
     }
 
     /**
+     * Schedule the trip for a future [startAtMillis] instead of starting now. Stores the time on the
+     * group doc; the server (tripScheduleTick) sends the day/15-min reminders and flips it live at the
+     * time. Resets the reminder flags so a re-schedule notifies again. Cancel via [endSession].
+     */
+    fun scheduleSession(gid: String, startAtMillis: Long, onDone: (String?) -> Unit) {
+        db.collection("groups").document(gid).update(
+            "tripScheduledAt", Timestamp(Date(startAtMillis)),
+            "tripActive", false, "tripDayNotified", false, "tripSoonNotified", false,
+        ).addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Could not schedule trip") }
+    }
+
+    /**
      * End the session (any group member may). Clears the session: removes all participants (everyone
      * goes offline) and all shared pins, then marks the group not-in-trip. This is the ONLY thing that
      * clears session pins — leaving does not.
@@ -118,7 +130,9 @@ object Trip {
                     offerSnap.documents.forEach { batch.delete(it.reference) }
                     partSnap.documents.forEach { batch.delete(it.reference) }
                     batch.delete(planRef(gid))                               // clear the plan
-                    batch.update(groupRef, "tripActive", false, "tripDest", FieldValue.delete())
+                    batch.update(groupRef, "tripActive", false, "tripDest", FieldValue.delete(),
+                        "tripScheduledAt", FieldValue.delete(),              // also cancels a pending schedule
+                        "tripDayNotified", FieldValue.delete(), "tripSoonNotified", FieldValue.delete())
                     batch.commit().addOnSuccessListener { onDone(null) }.addOnFailureListener { onDone(it.message ?: "Failed") }
                 }.addOnFailureListener { onDone(it.message ?: "Failed") }
             }.addOnFailureListener { onDone(it.message ?: "Failed") }

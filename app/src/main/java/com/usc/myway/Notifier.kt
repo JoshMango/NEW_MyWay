@@ -1,6 +1,6 @@
-// System notifications for group activity (messages, trip start). Heads-up (top pop-up) while the app
-// process is alive. NOTE: waking a fully-killed app needs Firebase Cloud Messaging + a server trigger;
-// this covers foreground + short-background only.
+// System notifications for app activity (group + DM messages, trip start, friend requests, group
+// invites). Heads-up (top pop-up) while the app process is alive. NOTE: waking a fully-killed app
+// needs Firebase Cloud Messaging + a server trigger; this covers foreground + short-background only.
 package com.usc.myway
 
 import android.Manifest
@@ -18,14 +18,17 @@ import androidx.core.content.ContextCompat
 object Notifier {
     private const val CH_MESSAGES = "messages"
     private const val CH_TRIPS = "trips"
+    private const val CH_SOCIAL = "social"
 
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
         nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH)
-            .apply { description = "Group chat messages" })
+            .apply { description = "Group and direct messages" })
         nm.createNotificationChannel(NotificationChannel(CH_TRIPS, "Trips", NotificationManager.IMPORTANCE_HIGH)
             .apply { description = "Trip activity" })
+        nm.createNotificationChannel(NotificationChannel(CH_SOCIAL, "Social", NotificationManager.IMPORTANCE_HIGH)
+            .apply { description = "Friend requests and group invites" })
     }
 
     /** POST_NOTIFICATIONS is only enforced on Android 13+; older versions are always allowed. */
@@ -34,26 +37,52 @@ object Notifier {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     fun message(ctx: Context, gid: String, groupName: String, fromTag: String, preview: String) =
-        post(ctx, CH_MESSAGES, gid.hashCode(), gid, groupName, groupName, "@$fromTag: $preview",
-            NotificationCompat.CATEGORY_MESSAGE)
+        post(ctx, CH_MESSAGES, gid.hashCode(), groupName, "@$fromTag: $preview",
+            NotificationCompat.CATEGORY_MESSAGE, groupChatIntent(ctx, gid, groupName))
+
+    fun dm(ctx: Context, chatId: String, otherUid: String, otherTag: String, preview: String) =
+        post(ctx, CH_MESSAGES, chatId.hashCode(), "@$otherTag", preview,
+            NotificationCompat.CATEGORY_MESSAGE, dmIntent(ctx, chatId, otherUid, otherTag))
 
     fun trip(ctx: Context, gid: String, groupName: String) =
-        post(ctx, CH_TRIPS, ("trip:$gid").hashCode(), gid, groupName, "Trip started",
-            "A trip just started in $groupName", NotificationCompat.CATEGORY_EVENT)
+        post(ctx, CH_TRIPS, ("trip:$gid").hashCode(), "Trip started",
+            "A trip just started in $groupName", NotificationCompat.CATEGORY_EVENT, groupChatIntent(ctx, gid, groupName))
 
-    /** Clear a group's message notification (called when its chat is opened). */
-    fun clearMessages(ctx: Context, gid: String) =
-        NotificationManagerCompat.from(ctx).cancel(gid.hashCode())
+    /** Scheduled-trip reminder (day-before / few-mins-before); [body] copy comes from the server. */
+    fun tripScheduled(ctx: Context, gid: String, groupName: String, body: String) =
+        post(ctx, CH_TRIPS, ("tripsched:$gid").hashCode(), groupName, body,
+            NotificationCompat.CATEGORY_EVENT, groupChatIntent(ctx, gid, groupName))
 
-    private fun post(ctx: Context, channel: String, notifId: Int, gid: String, groupName: String,
-                     title: String, text: String, category: String) {
+    fun groupInvite(ctx: Context, gid: String, groupName: String) =
+        post(ctx, CH_SOCIAL, ("invite:$gid").hashCode(), "Added to a group",
+            "You were added to $groupName", NotificationCompat.CATEGORY_SOCIAL, groupChatIntent(ctx, gid, groupName))
+
+    fun friendRequest(ctx: Context, fromTag: String) =
+        post(ctx, CH_SOCIAL, ("req:$fromTag").hashCode(), "Friend request",
+            "@$fromTag wants to be friends", NotificationCompat.CATEGORY_SOCIAL,
+            Intent(ctx, FriendsActivity::class.java).apply { flags = TAP_FLAGS })
+
+    /** Clear a chat's message notification (called when its chat is opened). Works for both group and DM. */
+    fun clearMessages(ctx: Context, id: String) =
+        NotificationManagerCompat.from(ctx).cancel(id.hashCode())
+
+    private const val TAP_FLAGS = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+    private fun groupChatIntent(ctx: Context, gid: String, groupName: String) =
+        Intent(ctx, GroupChatActivity::class.java).apply {
+            putExtra("gid", gid); putExtra("name", groupName); flags = TAP_FLAGS
+        }
+
+    private fun dmIntent(ctx: Context, chatId: String, otherUid: String, otherTag: String) =
+        Intent(ctx, PrivateChatActivity::class.java).apply {
+            putExtra("chatId", chatId); putExtra("otherUid", otherUid); putExtra("otherTag", otherTag); flags = TAP_FLAGS
+        }
+
+    private fun post(ctx: Context, channel: String, notifId: Int,
+                     title: String, text: String, category: String, tap: Intent) {
         if (!canPost(ctx)) return
-        val tap = PendingIntent.getActivity(
-            ctx, notifId,
-            Intent(ctx, GroupChatActivity::class.java).apply {
-                putExtra("gid", gid); putExtra("name", groupName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
+        val pending = PendingIntent.getActivity(
+            ctx, notifId, tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val n = NotificationCompat.Builder(ctx, channel)
@@ -63,7 +92,7 @@ object Notifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)   // heads-up (top pop-up) on pre-O
             .setCategory(category)
             .setAutoCancel(true)
-            .setContentIntent(tap)
+            .setContentIntent(pending)
             .build()
         try { NotificationManagerCompat.from(ctx).notify(notifId, n) } catch (_: SecurityException) {}
     }

@@ -66,6 +66,8 @@ class PrivateChatActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        NotificationHub.activeDmId = chatId          // don't notify for the chat I'm reading
+        Notifier.clearMessages(this, chatId)         // clear any pending notification for it
         listeners += PrivateMessages.listenMessages(chatId) { messages = it }
         // Live profile — their new photo/@tag shows in the header the moment they change it.
         listeners += Profiles.listenProfile(otherUid) { otherPhoto = it.photo; if (it.tag.isNotEmpty()) otherTagLive = it.tag }
@@ -73,6 +75,7 @@ class PrivateChatActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        if (NotificationHub.activeDmId == chatId) NotificationHub.activeDmId = null
         listeners.forEach { it.remove() }; listeners.clear()
     }
 

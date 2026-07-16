@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -75,6 +76,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.canhub.cropper.CropImageContract
+import com.google.android.libraries.places.api.Places
+import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -104,6 +107,7 @@ private class ChatState {
     var messages by mutableStateOf<List<GroupMessage>>(emptyList())
     var friends by mutableStateOf<List<UserHit>>(emptyList())
     var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
+    var plan by mutableStateOf<Trip.TripPlan?>(null)   // shared objective queue (built while scheduling)
 }
 
 class GroupChatActivity : ComponentActivity() {
@@ -115,17 +119,32 @@ class GroupChatActivity : ComponentActivity() {
     private val myTag by lazy { (application as App).getUserTag(uid).ifEmpty { "me" } }
     private val s = ChatState()
     private val listeners = mutableListOf<ListenerRegistration>()
+    private val placesClient by lazy {
+        if (!Places.isInitialized()) Places.initializeWithNewPlacesApiEnabled(applicationContext, BuildConfig.MAPS_API_KEY)
+        Places.createClient(this)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MyWayTheme {
                 ChatScreen(
-                    s = s, myUid = uid, fallbackName = fallbackName,
+                    s = s, myUid = uid, fallbackName = fallbackName, placesClient = placesClient,
                     onBack = { finish() },
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
                     onJoinTrip = { joinTrip() },
+                    onScheduleTrip = { startAt, name ->
+                        Trip.scheduleSession(gid, startAt) { err ->
+                            if (err != null) toast("Couldn't schedule: $err")
+                            else Trip.createPlan(gid, name, uid, myTag) { e -> if (e != null) toast("Couldn't create plan: $e") }
+                        }
+                    },
+                    onCancelSchedule = { Trip.endSession(gid) { err -> if (err != null) toast("Couldn't cancel: $err") } },
+                    onCreatePlan = { name -> Trip.createPlan(gid, name, uid, myTag) { e -> if (e != null) toast("Couldn't create plan: $e") } },
+                    onAddPlanItem = { name, lat, lng -> Trip.addPlanItem(gid, name, lat, lng, uid, myTag) { e -> if (e != null) toast("Couldn't add: $e") } },
+                    onTogglePlanItem = { id, done -> Trip.setItemFinished(gid, id, done, uid, myTag) {} },
+                    onPausePlan = { paused -> Trip.setPlanPaused(gid, paused, uid, myTag) {} },
                     onLeaveTrip = { Trip.leave(uid) { err -> if (err != null) toast("Couldn't leave: $err") else Groups.postSystem(gid, "Joined the trip") } },
                     onEndTrip = { Trip.endSession(gid) { err -> if (err != null) toast("Couldn't end trip: $err") } },
                     onOpenPin = { m -> openSharedPin(m) },
@@ -145,6 +164,7 @@ class GroupChatActivity : ComponentActivity() {
         listeners += Groups.listenMessages(gid) { s.messages = it; markRead() }
         listeners += Friends.listenFriends(uid) { s.friends = it }
         listeners += Trip.listenMembers(gid) { s.tripMembers = it }
+        listeners += Trip.listenPlan(gid) { s.plan = it }
         listeners += Groups.listenGroup(gid) { g ->
             // Group deleted, or I'm no longer a member → close the screen.
             if (g == null || uid !in g.members) finish() else s.group = g
@@ -233,10 +253,17 @@ private fun ChatScreen(
     s: ChatState,
     myUid: String,
     fallbackName: String,
+    placesClient: PlacesClient,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onSendImage: (Uri) -> Unit,
     onJoinTrip: () -> Unit,
+    onScheduleTrip: (startAtMillis: Long, name: String) -> Unit,
+    onCancelSchedule: () -> Unit,
+    onCreatePlan: (String) -> Unit,
+    onAddPlanItem: (name: String, lat: Double, lng: Double) -> Unit,
+    onTogglePlanItem: (itemId: String, finished: Boolean) -> Unit,
+    onPausePlan: (Boolean) -> Unit,
     onLeaveTrip: () -> Unit,
     onEndTrip: () -> Unit,
     onOpenPin: (GroupMessage) -> Unit,
@@ -272,6 +299,7 @@ private fun ChatScreen(
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
+            else g?.tripScheduledAt?.let { ScheduledTripBar(it) { showInfo = true } }
             MessageList(s.messages, myUid, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
                 onOpenPin, onOpenLive, { fullImage = it }, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
@@ -281,10 +309,30 @@ private fun ChatScreen(
     if (showInfo && g != null) {
         GroupInfoSheet(
             g = g, myUid = myUid, messages = s.messages, friends = s.friends,
-            onDismiss = { showInfo = false }, onStartTrip = onJoinTrip, actions = actions,
+            plan = s.plan, placesClient = placesClient,
+            onDismiss = { showInfo = false }, onStartTrip = onJoinTrip,
+            onScheduleTrip = onScheduleTrip, onCancelSchedule = onCancelSchedule,
+            onCreatePlan = onCreatePlan, onAddPlanItem = onAddPlanItem,
+            onTogglePlanItem = onTogglePlanItem, onPausePlan = onPausePlan,
+            actions = actions,
         )
     }
     fullImage?.let { FullscreenImageDialog(it) { fullImage = null } }
+}
+
+/** Slim banner shown in the chat while a trip is scheduled (not yet live). Tap → info sheet to manage it. */
+@Composable
+private fun ScheduledTripBar(startAtMillis: Long, onTap: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Teal.copy(alpha = 0.12f)).clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Schedule, contentDescription = null, tint = TealDeep, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Trip scheduled for ${stamp(startAtMillis)}", fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface)
+    }
 }
 
 /** Ongoing-trip banner (rendered only while a trip is active) — Join/Leave + End, like an iPhone call bar. */
@@ -529,13 +577,23 @@ private fun GroupInfoSheet(
     myUid: String,
     messages: List<GroupMessage>,
     friends: List<UserHit>,
+    plan: Trip.TripPlan?,
+    placesClient: PlacesClient,
     onDismiss: () -> Unit,
     onStartTrip: () -> Unit,
+    onScheduleTrip: (startAtMillis: Long, name: String) -> Unit,
+    onCancelSchedule: () -> Unit,
+    onCreatePlan: (String) -> Unit,
+    onAddPlanItem: (name: String, lat: Double, lng: Double) -> Unit,
+    onTogglePlanItem: (itemId: String, finished: Boolean) -> Unit,
+    onPausePlan: (Boolean) -> Unit,
     actions: GroupActions,
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAdd by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showSchedule by remember { mutableStateOf(false) }   // scheduling dialog
+    var showQueue by remember { mutableStateOf(false) }      // plan/queue sheet (activities)
     val iAmOwner = myUid == g.owner
     val iAmAdmin = g.isAdmin(myUid)
     val recentImages = remember(messages) { messages.filter { it.image.isNotEmpty() }.takeLast(12).reversed() }
@@ -560,24 +618,40 @@ private fun GroupInfoSheet(
                 }
             }
 
-            // Trip: start it here; once ongoing, Join/Leave/End live in the chat banner.
+            // Trip: start it now or schedule it here; once ongoing, Join/Leave/End live in the chat banner.
             item {
-                if (!g.tripActive) {
-                    Button(
-                        onClick = { onStartTrip(); onDismiss() },
-                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
-                    ) { 
-                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Start Trip", fontWeight = FontWeight.Bold) 
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                when {
+                    g.tripActive -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Icon(Icons.Outlined.RadioButtonChecked, contentDescription = null, tint = Danger, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Trip in progress — join or end it from the chat.",
                             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
+                    g.tripScheduledAt != null -> Column(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Schedule, contentDescription = null, tint = TealDeep, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Trip scheduled for ${stamp(g.tripScheduledAt)}", fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        Text("The group is notified a day and 15 min before.", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.padding(top = 2.dp))
+                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { showQueue = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
+                                Text("Activities" + (plan?.items?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: ""))
+                            }
+                            OutlinedButton(onClick = { onCancelSchedule(); onDismiss() }, modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)) { Text("Cancel", color = Danger) }
+                        }
+                    }
+                    else -> Button(
+                        onClick = { showSchedule = true },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Start Trip", fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -642,6 +716,79 @@ private fun GroupInfoSheet(
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
+
+    if (showSchedule) {
+        ScheduleTripDialog(
+            onDismiss = { showSchedule = false },
+            onStartNow = { showSchedule = false; onStartTrip(); onDismiss() },
+            onSchedule = { startAt, name -> showSchedule = false; onScheduleTrip(startAt, name); showQueue = true },
+        )
+    }
+
+    // Activities (the shared queue) — used to build the plan after scheduling, or edit it later.
+    if (showQueue) {
+        PlanSheet(
+            plan = plan, placesClient = placesClient,
+            onCreate = onCreatePlan, onAddItem = onAddPlanItem,
+            onToggle = onTogglePlanItem, onPause = onPausePlan,
+            onDismiss = { showQueue = false },
+        )
+    }
+}
+
+/**
+ * Schedule (or immediately start) a trip. Time defaults to now; picking a future date/time schedules it,
+ * a time in the past is rejected. Uses the platform date/time pickers (no extra deps).
+ */
+@Composable
+private fun ScheduleTripDialog(
+    onDismiss: () -> Unit,
+    onStartNow: () -> Unit,
+    onSchedule: (startAtMillis: Long, name: String) -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var name by remember { mutableStateOf("") }
+    var startMs by remember { mutableStateOf(System.currentTimeMillis()) }   // chosen start; defaults to now
+    val isFuture = startMs > System.currentTimeMillis() + 60_000L            // >1 min out ⇒ scheduled, else "now"
+
+    fun pickDate() {
+        val c = Calendar.getInstance().apply { timeInMillis = startMs }
+        android.app.DatePickerDialog(ctx, { _, y, mo, d ->
+            c.set(y, mo, d)
+            android.app.TimePickerDialog(ctx, { _, h, mi ->
+                c.set(Calendar.HOUR_OF_DAY, h); c.set(Calendar.MINUTE, mi); c.set(Calendar.SECOND, 0)
+                startMs = c.timeInMillis
+            }, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), false).show()
+        }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH))
+            .apply { datePicker.minDate = System.currentTimeMillis() }.show()
+    }
+
+    val inPast = startMs < System.currentTimeMillis() - 60_000L
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Start a trip", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Trip name") },
+                    singleLine = true, shape = RoundedCornerShape(12.dp))
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = { pickDate() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                    Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isFuture) stamp(startMs) else "Now — tap to schedule for later")
+                }
+                if (inPast) Text("That time is in the past.", color = Danger, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !inPast,
+                onClick = { if (isFuture) onSchedule(startMs, name.trim().ifEmpty { "Trip plan" }) else onStartNow() },
+            ) { Text(if (isFuture) "Schedule" else "Start now", fontWeight = FontWeight.Bold, color = Teal) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

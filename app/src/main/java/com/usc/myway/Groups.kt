@@ -20,6 +20,7 @@ data class Group(
     val tags: Map<String, String>,
     val photo: String = "",
     val tripActive: Boolean = false,   // an ongoing trip session (joinable, marked LIVE) — survives everyone leaving
+    val tripScheduledAt: Long? = null, // a future trip: start time (millis). Set ⇒ scheduled, not yet live. Server flips it live at the time.
     val reads: Map<String, Long> = emptyMap(),  // uid → ts of the newest message they've seen (read receipts)
     val lastMsg: String = "",          // inbox preview — mirrors DMs so the unified Messages list sorts/shows groups
     val lastTs: Long = 0,              // newest message time; what the unified inbox sorts on
@@ -104,6 +105,7 @@ object Groups {
             tags = (d.get("tags") as? Map<String, String>) ?: emptyMap(),
             photo = d.getString("photo") ?: "",
             tripActive = d.getBoolean("tripActive") ?: false,
+            tripScheduledAt = d.getTimestamp("tripScheduledAt")?.toDate()?.time,
             reads = (d.get("reads") as? Map<String, Long>) ?: emptyMap(),
             lastMsg = d.getString("lastMsg") ?: "",
             lastTs = d.getLong("lastTs") ?: 0L,

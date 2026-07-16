@@ -22,6 +22,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         when (data["type"]) {
             "message" -> Notifier.message(this, gid, name, data["fromTag"] ?: "", data["preview"] ?: "")
             "trip" -> Notifier.trip(this, gid, name)
+            "tripScheduled" -> Notifier.tripScheduled(this, gid, name, data["body"] ?: "Upcoming trip")
         }
     }
 }

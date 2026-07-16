@@ -27,10 +27,10 @@ object PrivateMessages {
 
     fun pairId(a: String, b: String) = listOf(a, b).sorted().joinToString("_")
 
-    /** List of all my active private chats. */
+    /** List of all my active private chats. No orderBy: a composite index (array-contains + lastTs)
+     *  isn't deployed, and its absence makes the listener fail silently — the inbox sorts client-side. */
     fun listenMyChats(myUid: String, onChange: (List<PrivateChat>) -> Unit): ListenerRegistration =
         db.collection("private_chats").whereArrayContains("users", myUid)
-            .orderBy("lastTs", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, _ ->
                 if (snap == null) return@addSnapshotListener
                 onChange(snap.documents.mapNotNull { d ->
