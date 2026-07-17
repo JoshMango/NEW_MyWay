@@ -89,6 +89,10 @@ object Profiles {
             .addOnFailureListener { onResult("") }
     }
 
+    fun blockUser(uid: String, targetUid: String) {
+        db.collection("users").document(uid).update("blocked", FieldValue.arrayUnion(targetUid))
+    }
+
     sealed interface ClaimResult {
         data class Success(val tag: String) : ClaimResult
         data object Taken : ClaimResult

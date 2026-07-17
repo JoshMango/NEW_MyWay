@@ -16,9 +16,15 @@ data class PrivateChat(
     val tags: Map<String, String>,
     val lastMsg: String = "",
     val lastTs: Long = 0,
+    val pinned: Map<String, Boolean> = emptyMap(),
+    val archived: Map<String, Boolean> = emptyMap(),
+    val muted: Map<String, Boolean> = emptyMap()
 ) {
     fun otherUid(myUid: String) = users.firstOrNull { it != myUid } ?: ""
     fun otherTag(myUid: String) = tags[otherUid(myUid)] ?: "User"
+    fun isPinned(uid: String) = pinned[uid] == true
+    fun isArchived(uid: String) = archived[uid] == true
+    fun isMuted(uid: String) = muted[uid] == true
 }
 
 object PrivateMessages {
@@ -27,19 +33,53 @@ object PrivateMessages {
 
     fun pairId(a: String, b: String) = listOf(a, b).sorted().joinToString("_")
 
-    /** List of all my active private chats. No orderBy: a composite index (array-contains + lastTs)
-     *  isn't deployed, and its absence makes the listener fail silently — the inbox sorts client-side. */
+    /** List of all my active private chats, ordered by lastTs descending. 
+     *  Note: This requires a composite index (users array-contains + lastTs descending). */
     fun listenMyChats(myUid: String, onChange: (List<PrivateChat>) -> Unit): ListenerRegistration =
         db.collection("private_chats").whereArrayContains("users", myUid)
-            .addSnapshotListener { snap, _ ->
+            .orderBy("lastTs", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.e("PrivateMessages", "listenMyChats failed. Ensure index is created: ${err.message}")
+                    return@addSnapshotListener
+                }
                 if (snap == null) return@addSnapshotListener
                 onChange(snap.documents.mapNotNull { d ->
                     val users = d.get("users") as? List<String> ?: return@mapNotNull null
                     @Suppress("UNCHECKED_CAST")
                     val tags = d.get("tags") as? Map<String, String> ?: emptyMap()
-                    PrivateChat(d.id, users, tags, d.getString("lastMsg") ?: "", d.getLong("lastTs") ?: 0L)
+                    @Suppress("UNCHECKED_CAST")
+                    val pinned = d.get("pinned") as? Map<String, Boolean> ?: emptyMap()
+                    @Suppress("UNCHECKED_CAST")
+                    val archived = d.get("archived") as? Map<String, Boolean> ?: emptyMap()
+                    @Suppress("UNCHECKED_CAST")
+                    val muted = d.get("muted") as? Map<String, Boolean> ?: emptyMap()
+                    
+                    PrivateChat(
+                        id = d.id, 
+                        users = users, 
+                        tags = tags, 
+                        lastMsg = d.getString("lastMsg") ?: "", 
+                        lastTs = d.getLong("lastTs") ?: 0L,
+                        pinned = pinned,
+                        archived = archived,
+                        muted = muted
+                    )
                 })
             }
+
+    fun updateMetadata(chatId: String, myUid: String, field: String, value: Any) {
+        db.collection("private_chats").document(chatId)
+            .update("$field.$myUid", value)
+            .addOnFailureListener { Log.e("PrivateMessages", "updateMetadata failed", it) }
+    }
+
+    fun deleteChat(chatId: String, myUid: String) {
+        // Remove the user from the chat entirely for a local "delete" effect.
+        db.collection("private_chats").document(chatId)
+            .update("users", com.google.firebase.firestore.FieldValue.arrayRemove(myUid))
+            .addOnFailureListener { Log.e("PrivateMessages", "deleteChat failed", it) }
+    }
 
     fun listenMessages(chatId: String, onChange: (List<GroupMessage>) -> Unit): ListenerRegistration =
         db.collection("private_chats").document(chatId).collection("messages")

@@ -5,6 +5,7 @@
 // Callback-based (no coroutines-play-services dependency).
 package com.usc.myway
 
+import android.util.Log
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -24,9 +25,15 @@ data class Group(
     val reads: Map<String, Long> = emptyMap(),  // uid → ts of the newest message they've seen (read receipts)
     val lastMsg: String = "",          // inbox preview — mirrors DMs so the unified Messages list sorts/shows groups
     val lastTs: Long = 0,              // newest message time; what the unified inbox sorts on
+    val pinned: Map<String, Boolean> = emptyMap(),
+    val archived: Map<String, Boolean> = emptyMap(),
+    val muted: Map<String, Boolean> = emptyMap()
 ) {
     fun isAdmin(uid: String) = uid == owner || uid in admins
     fun tagOf(uid: String) = tags[uid] ?: "unknown"
+    fun isPinned(uid: String) = pinned[uid] == true
+    fun isArchived(uid: String) = archived[uid] == true
+    fun isMuted(uid: String) = muted[uid] == true
 }
 
 /** A chat message: text, an image (base64 JPEG), or a shared location pin (pinLat != null). */
@@ -81,6 +88,12 @@ object Groups {
                 if (snap != null) onChange(snap.documents.mapNotNull { mapGroup(it.id, it) })
             }
 
+    fun updateMetadata(gid: String, myUid: String, field: String, value: Any) {
+        db.collection("groups").document(gid)
+            .update("$field.$myUid", value)
+            .addOnFailureListener { Log.e("Groups", "updateMetadata failed", it) }
+    }
+
     /** One-shot group name lookup. */
     fun fetchNamePhoto(gid: String, onResult: (name: String, photo: String) -> Unit) {
         db.collection("groups").document(gid).get()
@@ -109,6 +122,9 @@ object Groups {
             reads = (d.get("reads") as? Map<String, Long>) ?: emptyMap(),
             lastMsg = d.getString("lastMsg") ?: "",
             lastTs = d.getLong("lastTs") ?: 0L,
+            pinned = (d.get("pinned") as? Map<String, Boolean>) ?: emptyMap(),
+            archived = (d.get("archived") as? Map<String, Boolean>) ?: emptyMap(),
+            muted = (d.get("muted") as? Map<String, Boolean>) ?: emptyMap()
         )
     }
 

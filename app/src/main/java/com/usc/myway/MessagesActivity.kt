@@ -1,14 +1,16 @@
-// Unified inbox (Messenger-style): group chats + 1-on-1 DMs in one list, newest first. The + button
-// starts either a DM (pick a friend) or a new group. DM rows carry a live profile listener so a
-// friend's new photo/@tag shows up immediately; groups already stream via the groups listener.
+// Unified inbox (Messenger-style): group chats + 1-on-1 DMs in one list, newest first.
+// Enhanced with tabs (All/Groups), long-press context menu (Pin/Archive/Mute/Block/Delete),
+// and a persistent archiving system.
 package com.usc.myway
 
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,13 +19,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,14 +38,32 @@ import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
 private val TealDeep = Color(0xFF00A77D)
+private val Danger = Color(0xFFEF4444)
 
-// One inbox row — a DM or a group, normalised so they sort together by recency.
+// One inbox row — a DM or a group, normalised so they sort together by pinning and recency.
 private sealed interface Inbox {
+    val id: String
     val ts: Long
-    data class Dm(val chat: PrivateChat, val otherUid: String, val fallbackTag: String) : Inbox {
+    val pinned: Boolean
+    val archived: Boolean
+    val muted: Boolean
+
+    data class Dm(val chat: PrivateChat, val myUid: String) : Inbox {
+        override val id get() = chat.id
         override val ts get() = chat.lastTs
+        override val pinned get() = chat.isPinned(myUid)
+        override val archived get() = chat.isArchived(myUid)
+        override val muted get() = chat.isMuted(myUid)
+        val otherUid = chat.otherUid(myUid)
+        val otherTag = chat.otherTag(myUid)
     }
-    data class Grp(val g: Group) : Inbox { override val ts get() = g.lastTs }
+    data class Grp(val g: Group, val myUid: String) : Inbox {
+        override val id get() = g.id
+        override val ts get() = g.lastTs
+        override val pinned get() = g.isPinned(myUid)
+        override val archived get() = g.isArchived(myUid)
+        override val muted get() = g.isMuted(myUid)
+    }
 }
 
 class MessagesActivity : ComponentActivity() {
@@ -53,7 +76,7 @@ class MessagesActivity : ComponentActivity() {
     private var friends by mutableStateOf<List<UserHit>>(emptyList())
     private var creating by mutableStateOf(false)
     private val listeners = mutableListOf<ListenerRegistration>()
-    private val backfilled = mutableSetOf<String>()   // groups we've already seeded a preview for this session
+    private val backfilled = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,7 +88,6 @@ class MessagesActivity : ComponentActivity() {
         listeners += PrivateMessages.listenMyChats(uid) { chats = it }
         listeners += Groups.listenMyGroups(uid) { list ->
             groups = list
-            // Legacy groups predate lastMsg/lastTs — seed them once so they sort/preview in the inbox.
             list.forEach { if (it.lastTs == 0L && backfilled.add(it.id)) Groups.backfillPreview(it.id) }
         }
         listeners += Friends.listenFriends(uid) { friends = it }
@@ -76,55 +98,96 @@ class MessagesActivity : ComponentActivity() {
         listeners.forEach { it.remove() }; listeners.clear()
     }
 
-    private fun inbox(): List<Inbox> =
-        (chats.map { Inbox.Dm(it, it.otherUid(uid), it.otherTag(uid)) } + groups.map { Inbox.Grp(it) })
-            .sortedByDescending { it.ts }
+    private fun inbox(archived: Boolean, groupsOnly: Boolean): List<Inbox> {
+        val all = (chats.map { Inbox.Dm(it, uid) } + groups.map { Inbox.Grp(it, uid) })
+        return all.filter { it.archived == archived && (!groupsOnly || it is Inbox.Grp) }
+            .sortedWith(compareByDescending<Inbox> { it.pinned }.thenByDescending { it.ts })
+    }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun MessagesScreen() {
+        var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+        var showArchived by rememberSaveable { mutableStateOf(false) }
         var showMenu by remember { mutableStateOf(false) }
         var showNewDM by remember { mutableStateOf(false) }
         var showCreate by remember { mutableStateOf(false) }
-        val items = inbox()
+        var selectedItem by remember { mutableStateOf<Inbox?>(null) }
+        val sheetState = rememberModalBottomSheetState()
+        
+        val items = remember(chats, groups, selectedTabIndex, showArchived) {
+            inbox(archived = showArchived, groupsOnly = selectedTabIndex == 1)
+        }
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Messages", fontWeight = FontWeight.Bold) },
+                    title = { Text(if (showArchived) "Archived" else "Messages", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(onClick = { finish() }) {
+                        IconButton(onClick = { if (showArchived) showArchived = false else finish() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        if (!showArchived) {
+                            IconButton(onClick = { showArchived = true }) {
+                                Icon(Icons.Outlined.Archive, contentDescription = "View Archived")
+                            }
                         }
                     }
                 )
             },
             floatingActionButton = {
-                Box {
-                    FloatingActionButton(onClick = { showMenu = true }, containerColor = Teal) {
-                        Icon(Icons.Default.Edit, contentDescription = "New conversation", tint = Color.White)
-                    }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(text = { Text("Message a friend") }, onClick = { showMenu = false; showNewDM = true })
-                        DropdownMenuItem(text = { Text("Create a group") }, onClick = { showMenu = false; showCreate = true })
+                if (!showArchived) {
+                    Box {
+                        FloatingActionButton(onClick = { showMenu = true }, containerColor = Teal) {
+                            Icon(Icons.Default.Edit, contentDescription = "New conversation", tint = Color.White)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(text = { Text("Message a friend") }, onClick = { showMenu = false; showNewDM = true })
+                            DropdownMenuItem(text = { Text("Create a group") }, onClick = { showMenu = false; showCreate = true })
+                        }
                     }
                 }
             }
         ) { pad ->
-            if (items.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(pad).padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("No conversations yet.\nTap the pencil to message a friend or start a group.",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
-            } else {
-                LazyColumn(Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp)) {
-                    items(items, key = { if (it is Inbox.Grp) "g:${it.g.id}" else "p:${(it as Inbox.Dm).chat.id}" }) { row ->
-                        when (row) {
-                            is Inbox.Dm -> DmRow(row)
-                            is Inbox.Grp -> GroupRow(row.g)
+            Column(Modifier.fillMaxSize().padding(pad)) {
+                if (!showArchived) {
+                    PrimaryTabRow(selectedTabIndex = selectedTabIndex, containerColor = MaterialTheme.colorScheme.surface) {
+                        Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }) {
+                            Text("All", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Medium)
+                        }
+                        Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
+                            Text("Groups", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Medium)
                         }
                     }
                 }
+
+                if (items.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Text(if (showArchived) "No archived conversations." else "No conversations yet.\nTap the pencil to message a friend or start a group.",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                        items(items, key = { it.id }) { row ->
+                            when (row) {
+                                is Inbox.Dm -> DmRow(row) { selectedItem = row }
+                                is Inbox.Grp -> GroupRow(row) { selectedItem = row }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        selectedItem?.let { item ->
+            ModalBottomSheet(
+                onDismissRequest = { selectedItem = null },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                ContextActions(item, onDismiss = { selectedItem = null })
             }
         }
 
@@ -141,9 +204,10 @@ class MessagesActivity : ComponentActivity() {
         )
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun DmRow(dm: Inbox.Dm) {
-        var tag by remember(dm.otherUid) { mutableStateOf(dm.fallbackTag) }
+    private fun DmRow(dm: Inbox.Dm, onLongClick: () -> Unit) {
+        var tag by remember(dm.otherUid) { mutableStateOf(dm.otherTag) }
         var photo by remember(dm.otherUid) { mutableStateOf("") }
         DisposableEffect(dm.otherUid) {
             val reg = Profiles.listenProfile(dm.otherUid) { p ->
@@ -154,29 +218,47 @@ class MessagesActivity : ComponentActivity() {
         }
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                .clickable {
-                    startActivity(Intent(this@MessagesActivity, PrivateChatActivity::class.java)
-                        .putExtra("chatId", dm.chat.id).putExtra("otherUid", dm.otherUid).putExtra("otherTag", tag))
-                }
+                .combinedClickable(
+                    onClick = {
+                        startActivity(Intent(this@MessagesActivity, PrivateChatActivity::class.java)
+                            .putExtra("chatId", dm.chat.id).putExtra("otherUid", dm.otherUid).putExtra("otherTag", tag))
+                    },
+                    onLongClick = onLongClick
+                )
                 .padding(12.dp), verticalAlignment = Alignment.CenterVertically
         ) {
             AvatarCircle(photo = photo, fallback = tag, size = 48.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("@$tag", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("@$tag", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    if (dm.pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.PushPin, null, Modifier.size(12.dp), TealDeep)
+                    }
+                    if (dm.muted) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Outlined.NotificationsOff, null, Modifier.size(12.dp), MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    }
+                }
                 Preview(dm.chat.lastMsg)
             }
         }
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun GroupRow(g: Group) {
+    private fun GroupRow(row: Inbox.Grp, onLongClick: () -> Unit) {
+        val g = row.g
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                .clickable {
-                    startActivity(Intent(this@MessagesActivity, GroupChatActivity::class.java)
-                        .putExtra("gid", g.id).putExtra("name", g.name))
-                }
+                .combinedClickable(
+                    onClick = {
+                        startActivity(Intent(this@MessagesActivity, GroupChatActivity::class.java)
+                            .putExtra("gid", g.id).putExtra("name", g.name))
+                    },
+                    onLongClick = onLongClick
+                )
                 .padding(12.dp), verticalAlignment = Alignment.CenterVertically
         ) {
             AvatarCircle(photo = g.photo, fallback = g.name, size = 48.dp)
@@ -186,6 +268,14 @@ class MessagesActivity : ComponentActivity() {
                     Icon(Icons.Default.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(5.dp))
                     Text(g.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    if (row.pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.PushPin, null, Modifier.size(12.dp), TealDeep)
+                    }
+                    if (row.muted) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Outlined.NotificationsOff, null, Modifier.size(12.dp), MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    }
                     if (g.tripActive) {
                         Spacer(Modifier.width(8.dp))
                         Row(
@@ -207,6 +297,50 @@ class MessagesActivity : ComponentActivity() {
     private fun Preview(text: String) {
         if (text.isNotEmpty()) Text(text, fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), maxLines = 1)
+    }
+
+    @Composable
+    private fun ContextActions(item: Inbox, onDismiss: () -> Unit) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            val title = if (item is Inbox.Dm) "@${item.otherTag}" else (item as Inbox.Grp).g.name
+            Text(title, Modifier.padding(16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            
+            ActionItem(if (item.pinned) "Unpin" else "Pin", if (item.pinned) Icons.Outlined.PushPin else Icons.Outlined.PushPin) {
+                if (item is Inbox.Dm) PrivateMessages.updateMetadata(item.id, uid, "pinned", !item.pinned)
+                else Groups.updateMetadata(item.id, uid, "pinned", !item.pinned)
+                onDismiss()
+            }
+            ActionItem(if (item.archived) "Unarchive" else "Archive", if (item.archived) Icons.Outlined.Unarchive else Icons.Outlined.Archive) {
+                if (item is Inbox.Dm) PrivateMessages.updateMetadata(item.id, uid, "archived", !item.archived)
+                else Groups.updateMetadata(item.id, uid, "archived", !item.archived)
+                onDismiss()
+            }
+            ActionItem(if (item.muted) "Unmute" else "Mute", if (item.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff) {
+                if (item is Inbox.Dm) PrivateMessages.updateMetadata(item.id, uid, "muted", !item.muted)
+                else Groups.updateMetadata(item.id, uid, "muted", !item.muted)
+                onDismiss()
+            }
+            if (item is Inbox.Dm) {
+                ActionItem("Block User", Icons.Outlined.Block, color = Danger) {
+                    Profiles.blockUser(uid, item.otherUid)
+                    onDismiss()
+                }
+            }
+            ActionItem("Delete Chat", Icons.Outlined.Delete, color = Danger) {
+                if (item is Inbox.Dm) PrivateMessages.deleteChat(item.id, uid)
+                else Groups.leaveGroup(item.id, uid) { }
+                onDismiss()
+            }
+        }
+    }
+
+    @Composable
+    private fun ActionItem(label: String, icon: ImageVector, color: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
+        ListItem(
+            headlineContent = { Text(label, color = color) },
+            leadingContent = { Icon(icon, null, tint = color) },
+            modifier = Modifier.clickable(onClick = onClick)
+        )
     }
 }
 
