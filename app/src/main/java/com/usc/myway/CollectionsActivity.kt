@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,7 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.ListenerRegistration
 import com.usc.myway.ui.theme.MyWayTheme
 
 private val Teal = Color(0xFF00C99D)
@@ -73,6 +74,7 @@ class CollectionsActivity : ComponentActivity() {
         var showCreateDialog by remember { mutableStateOf(false) }
         var editCollTarget by remember { mutableStateOf<Collection?>(null) }
         var deleteCollTarget by remember { mutableStateOf<Collection?>(null) }
+        var showDeleteAllConfirm by remember { mutableStateOf(false) }
         
         var addWaypointTarget by remember { mutableStateOf<Collection?>(null) }
         var editWaypointKey by remember { mutableStateOf<String?>(null) }
@@ -87,6 +89,13 @@ class CollectionsActivity : ComponentActivity() {
                     navigationIcon = {
                         IconButton(onClick = { finish() }) {
                             Text("←", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    actions = {
+                        if (collections.isNotEmpty()) {
+                            IconButton(onClick = { showDeleteAllConfirm = true }) {
+                                Icon(Icons.Outlined.DeleteSweep, contentDescription = "Delete All", tint = Danger)
+                            }
                         }
                     }
                 )
@@ -135,6 +144,23 @@ class CollectionsActivity : ComponentActivity() {
         addWaypointTarget?.let { c -> AddWaypointToCollectionDialog(c) { addWaypointTarget = null } }
         editWaypointKey?.let { key -> EditWaypointDialog(key) { editWaypointKey = null } }
         removeWaypointTarget?.let { (key, coll) -> RemoveWaypointDialog(key, coll) { removeWaypointTarget = null } }
+
+        if (showDeleteAllConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteAllConfirm = false },
+                title = { Text("Delete All Collections") },
+                text = { Text("Are you sure you want to delete all collections? This action cannot be undone. The saved locations inside won't be deleted.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        app.clearAllCollections()
+                        showDeleteAllConfirm = false
+                    }) { Text("Delete All", color = Danger, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteAllConfirm = false }) { Text("Cancel") }
+                }
+            )
+        }
     }
 
     @Composable
@@ -149,8 +175,8 @@ class CollectionsActivity : ComponentActivity() {
 
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface, // Changed from surfaceVariant to surface (White)
-            shadowElevation = 2.dp, // Added shadow to make it pop against the background
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(14.dp)) {

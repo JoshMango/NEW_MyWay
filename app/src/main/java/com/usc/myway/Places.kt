@@ -62,7 +62,6 @@ object Places {
     fun deleteCollection(uid: String, id: String) { colls(uid).document(id).delete() }
 
     /** One-time lift of the old SharedPreferences data into Firestore. */
-    // ponytail: single batch (500-write cap). Personal maps don't get near it; chunk if that changes.
     fun uploadAll(uid: String, docs: List<Doc>, collections: List<Collection>) {
         if (docs.isEmpty() && collections.isEmpty()) return
         val batch = db.batch()
@@ -73,15 +72,29 @@ object Places {
         batch.commit()
     }
 
+    /** Wipe only saved waypoints for this user. */
+    fun deletePlaces(uid: String) {
+        places(uid).get().addOnSuccessListener { snap ->
+            if (snap.isEmpty) return@addOnSuccessListener
+            val batch = db.batch()
+            snap.documents.forEach { batch.delete(it.reference) }
+            batch.commit()
+        }
+    }
+
+    /** Wipe only collections for this user. */
+    fun deleteCollections(uid: String) {
+        colls(uid).get().addOnSuccessListener { snap ->
+            if (snap.isEmpty) return@addOnSuccessListener
+            val batch = db.batch()
+            snap.documents.forEach { batch.delete(it.reference) }
+            batch.commit()
+        }
+    }
+
     /** Wipe every place + collection for this user. */
     fun deleteAll(uid: String) {
-        for (ref in listOf(places(uid), colls(uid))) {
-            ref.get().addOnSuccessListener { snap ->
-                if (snap.isEmpty) return@addOnSuccessListener
-                val batch = db.batch()
-                snap.documents.forEach { batch.delete(it.reference) }
-                batch.commit()
-            }
-        }
+        deletePlaces(uid)
+        deleteCollections(uid)
     }
 }

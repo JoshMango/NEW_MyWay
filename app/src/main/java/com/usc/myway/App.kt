@@ -143,10 +143,18 @@ class App : Application() {
         dataVersion++
     }
 
-    /** Wipe my saved places, notes and collections — locally and in Firestore. Keeps settings & sign-in. */
+    /** Wipe only saved waypoints and notes for this user. */
     fun clearMyPlaces() {
-        if (uid.isNotEmpty()) Places.deleteAll(uid)
-        clearMirror()
+        if (uid.isNotEmpty()) Places.deletePlaces(uid)
+        myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear()
+        dataVersion++
+    }
+
+    /** Wipe every collection for this user. */
+    fun clearAllCollections() {
+        if (uid.isNotEmpty()) Places.deleteCollections(uid)
+        collections.clear()
+        dataVersion++
     }
 
     // ── Locations ──────────────────────────────────────────────────────────────

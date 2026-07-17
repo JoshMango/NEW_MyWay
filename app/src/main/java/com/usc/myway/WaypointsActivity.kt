@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +40,7 @@ class WaypointsActivity : ComponentActivity() {
         val locations = remember(app.dataVersion) { app.myLocations.toList() }
         var editTarget by remember { mutableStateOf<String?>(null) }
         var deleteTarget by remember { mutableStateOf<String?>(null) }
+        var showDeleteAllConfirm by remember { mutableStateOf(false) }
 
         Scaffold(
             topBar = {
@@ -46,6 +49,13 @@ class WaypointsActivity : ComponentActivity() {
                     navigationIcon = {
                         IconButton(onClick = { finish() }) {
                             Text("←", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    actions = {
+                        if (locations.isNotEmpty()) {
+                            IconButton(onClick = { showDeleteAllConfirm = true }) {
+                                Icon(Icons.Outlined.DeleteSweep, contentDescription = "Delete All", tint = Danger)
+                            }
                         }
                     }
                 )
@@ -75,6 +85,23 @@ class WaypointsActivity : ComponentActivity() {
 
         editTarget?.let { key -> EditWaypointDialog(key) { editTarget = null } }
         deleteTarget?.let { key -> DeleteWaypointDialog(key) { deleteTarget = null } }
+        
+        if (showDeleteAllConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteAllConfirm = false },
+                title = { Text("Delete All Waypoints?") },
+                text = { Text("Are you sure you want to delete everything? This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        app.clearMyPlaces()
+                        showDeleteAllConfirm = false
+                    }) { Text("Delete All", color = Danger, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteAllConfirm = false }) { Text("Cancel") }
+                }
+            )
+        }
     }
 
     @Composable
@@ -86,8 +113,8 @@ class WaypointsActivity : ComponentActivity() {
 
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface, // Set to standard surface (White)
-            shadowElevation = 1.dp, // Add slight elevation to distinguish from background
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 1.dp,
             modifier = Modifier.fillMaxWidth().clickable(onClick = onFocus)
         ) {
             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
