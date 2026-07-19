@@ -177,6 +177,27 @@ object Groups {
         post(gid, mapOf("from" to fromUid, "fromTag" to fromTag, "text" to "", "image" to base64))
     }
 
+    /** Edit a group text message (author only). Refresh the inbox preview when it was the newest message. Mirrors DMs. */
+    fun editMessage(gid: String, mid: String, text: String, isLast: Boolean) {
+        val body = text.trim()
+        if (body.isEmpty()) return
+        val gref = db.collection("groups").document(gid)
+        gref.collection("messages").document(mid).update("text", body, "edited", true)
+            .addOnFailureListener { Log.e("Groups", "editMessage failed", it) }
+        if (isLast) gref.update("lastMsg", body)
+    }
+
+    /** Unsend a group message (author only). Soft-delete: keep the doc as a tombstone with content cleared. Mirrors DMs. */
+    fun unsendMessage(gid: String, mid: String, isLast: Boolean) {
+        val gref = db.collection("groups").document(gid)
+        gref.collection("messages").document(mid).update(
+            mapOf("unsent" to true, "text" to "", "image" to "", "liveFrom" to "",
+                "pinLat" to null, "pinLng" to null, "pinName" to "", "pinNote" to "", "pinPlaceId" to "",
+                "edited" to false)
+        ).addOnFailureListener { Log.e("Groups", "unsendMessage failed", it) }
+        if (isLast) gref.update("lastMsg", "Unsent a message")
+    }
+
     /** Share a personal pin/note into a group's chat as a tappable location card. */
     fun sharePin(gid: String, fromUid: String, fromTag: String, lat: Double, lng: Double, name: String, note: String, placeId: String) {
         post(gid, mapOf(

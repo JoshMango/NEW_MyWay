@@ -11,8 +11,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +55,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -72,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -133,6 +139,8 @@ class GroupChatActivity : ComponentActivity() {
                     onBack = { finish() },
                     onSend = { text -> Groups.sendMessage(gid, uid, myTag, text) },
                     onSendImage = { uri -> encode(uri, 1024, 60)?.let { Groups.sendImage(gid, uid, myTag, it) } },
+                    onUnsend = { m, isLast -> Groups.unsendMessage(gid, m.id, isLast) },
+                    onEdit = { m, text, isLast -> Groups.editMessage(gid, m.id, text, isLast) },
                     onJoinTrip = { joinTrip() },
                     onScheduleTrip = { startAt, name ->
                         Trip.scheduleSession(gid, startAt) { err ->
@@ -257,6 +265,8 @@ private fun ChatScreen(
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onSendImage: (Uri) -> Unit,
+    onUnsend: (GroupMessage, isLast: Boolean) -> Unit,
+    onEdit: (GroupMessage, text: String, isLast: Boolean) -> Unit,
     onJoinTrip: () -> Unit,
     onScheduleTrip: (startAtMillis: Long, name: String) -> Unit,
     onCancelSchedule: () -> Unit,
@@ -301,7 +311,7 @@ private fun ChatScreen(
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
             else g?.tripScheduledAt?.let { ScheduledTripBar(it) { showInfo = true } }
             MessageList(s.messages, myUid, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
-                onOpenPin, onOpenLive, { fullImage = it }, Modifier.weight(1f))
+                onOpenPin, onOpenLive, { fullImage = it }, onUnsend, onEdit, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
         }
     }
@@ -384,7 +394,9 @@ private fun TripBar(
 private fun MessageList(messages: List<GroupMessage>, myUid: String,
                         reads: Map<String, Long>, tags: Map<String, String>,
                         onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit,
-                        onOpenImage: (String) -> Unit, modifier: Modifier) {
+                        onOpenImage: (String) -> Unit,
+                        onUnsend: (GroupMessage, isLast: Boolean) -> Unit,
+                        onEdit: (GroupMessage, text: String, isLast: Boolean) -> Unit, modifier: Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -420,6 +432,8 @@ private fun MessageList(messages: List<GroupMessage>, myUid: String,
                     showAvatar = next == null || next.from != m.from,
                     onClick = { selectedId = if (selectedId == m.id) null else m.id },
                     onOpenPin = onOpenPin, onOpenLive = onOpenLive, onOpenImage = onOpenImage,
+                    onUnsend = { onUnsend(m, next == null) },
+                    onEdit = { text -> onEdit(m, text, next == null) },
                 )
                 if (selectedId == m.id && !m.system) MessageDetails(m, myUid, reads, tags, mine = m.from == myUid)
                 receipts[m.id]?.let { seenBy -> ReadReceipts(seenBy, tags) }
@@ -464,11 +478,15 @@ private fun ReadReceipts(uids: List<String>, tags: Map<String, String>) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(m: GroupMessage, mine: Boolean, showAvatar: Boolean,
                           onClick: () -> Unit,
                           onOpenPin: (GroupMessage) -> Unit, onOpenLive: (GroupMessage) -> Unit,
-                          onOpenImage: (String) -> Unit) {
+                          onOpenImage: (String) -> Unit, onUnsend: () -> Unit,
+                          onEdit: (String) -> Unit) {
+    var showMenu by remember(m.id) { mutableStateOf(false) }
+    var showEdit by remember(m.id) { mutableStateOf(false) }
     if (m.system) {
         Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
             Text(m.text, fontSize = 12.sp, fontWeight = FontWeight.Medium,
@@ -486,18 +504,35 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, showAvatar: Boolean,
             Box(Modifier.size(28.dp)) { if (showAvatar) LiveAvatar(m.from, m.fromTag, 28.dp) }
             Spacer(Modifier.width(6.dp))
         }
+        if (m.unsent) {
+            // Tombstone — kept in place (Messenger-style), muted italic + outlined, content gone. Same as DMs.
+            Text(
+                if (mine) "You unsent a message" else "@${m.fromTag} unsent a message",
+                fontSize = 14.sp, fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            return@Row
+        }
         val isImage = m.image.isNotEmpty()
+        Box {
         Column(
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(16.dp))
                 // Photos render on their own with no coloured bubble behind them (that teal box was the bug).
                 .background(if (isImage) Color.Transparent else if (mine) Teal else MaterialTheme.colorScheme.surfaceVariant)
                 // Pin/live cards navigate, images open full-screen, everything else toggles its time + seen-by line.
-                .clickable {
-                    when {
-                        isPin -> onOpenPin(m); isLive -> onOpenLive(m)
-                        isImage -> onOpenImage(m.image); else -> onClick()
-                    }
-                }
+                // Hold your own message to unsend it (mirrors DMs).
+                .combinedClickable(
+                    onClick = {
+                        when {
+                            isPin -> onOpenPin(m); isLive -> onOpenLive(m)
+                            isImage -> onOpenImage(m.image); else -> onClick()
+                        }
+                    },
+                    onLongClick = { if (mine) showMenu = true },
+                )
                 .padding(horizontal = if (isImage) 0.dp else 12.dp, vertical = if (isImage) 0.dp else 8.dp),
         ) {
             if (!mine) Text("@${m.fromTag}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealDeep,
@@ -537,9 +572,29 @@ private fun MessageBubble(m: GroupMessage, mine: Boolean, showAvatar: Boolean,
                             modifier = Modifier.widthIn(max = 240.dp).heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)))
                     }
                 }
-                else -> Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                else -> {
+                    Text(m.text, fontSize = 15.sp, color = if (mine) Color.White else MaterialTheme.colorScheme.onSurface)
+                    if (m.edited) Text("(edited)", fontSize = 11.sp, fontStyle = FontStyle.Italic,
+                        color = (if (mine) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.7f))
+                }
             }
         }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            // Edit only makes sense for plain text — not photos, pins, or live-location cards.
+            if (!isImage && !isPin && !isLive) DropdownMenuItem(text = { Text("Edit") }, onClick = { showMenu = false; showEdit = true })
+            DropdownMenuItem(text = { Text("Unsend") }, onClick = { showMenu = false; onUnsend() })
+        }
+        }
+    }
+    if (showEdit) {
+        var draft by remember { mutableStateOf(m.text) }
+        AlertDialog(
+            onDismissRequest = { showEdit = false },
+            title = { Text("Edit message") },
+            text = { OutlinedTextField(draft, { draft = it }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = { TextButton(onClick = { onEdit(draft); showEdit = false }, enabled = draft.isNotBlank()) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { showEdit = false }) { Text("Cancel") } },
+        )
     }
 }
 
