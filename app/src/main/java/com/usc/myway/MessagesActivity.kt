@@ -73,8 +73,6 @@ class MessagesActivity : ComponentActivity() {
     private val myTag by lazy { (application as App).getUserTag(uid).ifEmpty { "me" } }
     private val app get() = application as App
 
-    private var chats by mutableStateOf<List<PrivateChat>>(emptyList())
-    private var groups by mutableStateOf<List<Group>>(emptyList())
     private var friends by mutableStateOf<List<UserHit>>(emptyList())
     private var creating by mutableStateOf(false)
     private val listeners = mutableListOf<ListenerRegistration>()
@@ -87,11 +85,7 @@ class MessagesActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        listeners += PrivateMessages.listenMyChats(uid) { chats = it }
-        listeners += Groups.listenMyGroups(uid) { list ->
-            groups = list
-            list.forEach { if (it.lastTs == 0L && backfilled.add(it.id)) Groups.backfillPreview(it.id) }
-        }
+        // Chats/groups come from App's always-live listeners (single source of truth); we only need friends here.
         listeners += Friends.listenFriends(uid) { friends = it }
     }
 
@@ -101,7 +95,7 @@ class MessagesActivity : ComponentActivity() {
     }
 
     private fun inbox(archived: Boolean, groupsOnly: Boolean): List<Inbox> {
-        val all = (chats.map { Inbox.Dm(it, uid) } + groups.map { Inbox.Grp(it, uid) })
+        val all = (app.chats.map { Inbox.Dm(it, uid) } + app.groups.map { Inbox.Grp(it, uid) })
         return all.filter { it.archived == archived && (!groupsOnly || it is Inbox.Grp) }
             .sortedWith(compareByDescending<Inbox> { it.pinned }.thenByDescending { it.ts })
     }
@@ -117,8 +111,12 @@ class MessagesActivity : ComponentActivity() {
         var selectedItem by remember { mutableStateOf<Inbox?>(null) }
         val sheetState = rememberModalBottomSheetState()
 
-        val items = remember(chats, groups, selectedTabIndex, showArchived) {
+        val items = remember(app.chats, app.groups, selectedTabIndex, showArchived) {
             inbox(archived = showArchived, groupsOnly = selectedTabIndex == 1)
+        }
+        // One-time preview backfill for legacy groups created before lastMsg/lastTs existed.
+        LaunchedEffect(app.groups) {
+            app.groups.forEach { if (it.lastTs == 0L && backfilled.add(it.id)) Groups.backfillPreview(it.id) }
         }
 
         Scaffold(

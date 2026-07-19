@@ -49,8 +49,12 @@ class App : Application() {
     private var unreadGroupsReg: ListenerRegistration? = null
     private var pendingFriendsReg: ListenerRegistration? = null
 
-    private var rawChats = emptyList<PrivateChat>()
-    private var rawGroups = emptyList<Group>()
+    // Single source of truth for the inbox — always-live (bound at login, never torn down on navigation),
+    // so the Messages list updates in real time. Screens read these directly instead of re-listening.
+    var chats by mutableStateOf(emptyList<PrivateChat>())
+        private set
+    var groups by mutableStateOf(emptyList<Group>())
+        private set
     // Chat/group ids the user just opened locally — masked out of the unread count immediately,
     // before the Firestore "markRead" write has round-tripped back through the snapshot listener.
     private val locallyRead = mutableSetOf<String>()
@@ -149,11 +153,11 @@ class App : Application() {
             dataVersion++
         }
         unreadChatsReg = PrivateMessages.listenMyChats(uid) { list ->
-            rawChats = list
+            chats = list
             updateUnreadCounts()
         }
         unreadGroupsReg = Groups.listenMyGroups(uid) { list ->
-            rawGroups = list
+            groups = list
             updateUnreadCounts()
         }
         // Same query FriendsActivity uses for its "Requests" tab: pending requests where I'm the recipient.
@@ -164,14 +168,14 @@ class App : Application() {
 
     private fun updateUnreadCounts() {
         if (uid.isEmpty()) return
-        val unreadDms = rawChats.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
-        val unreadGrps = rawGroups.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
+        val unreadDms = chats.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
+        val unreadGrps = groups.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
         unreadGroupsCount = unreadGrps
         unreadAllCount = unreadDms + unreadGrps
         // Once a snapshot confirms an id is actually read, drop the override — keeps the mask from
         // permanently hiding a chat that becomes unread again later (e.g. a new incoming message).
-        val stillUnread = (rawChats.filter { it.isUnread(uid) }.map { it.id } +
-                rawGroups.filter { it.isUnread(uid) }.map { it.id }).toSet()
+        val stillUnread = (chats.filter { it.isUnread(uid) }.map { it.id } +
+                groups.filter { it.isUnread(uid) }.map { it.id }).toSet()
         locallyRead.retainAll(stillUnread)
     }
 
@@ -197,7 +201,7 @@ class App : Application() {
     private fun clearMirror() {
         myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear(); collections.clear()
         unreadAllCount = 0; unreadGroupsCount = 0; pendingFriendsCount = 0
-        rawChats = emptyList(); rawGroups = emptyList(); locallyRead.clear()
+        chats = emptyList(); groups = emptyList(); locallyRead.clear()
         dataVersion++
     }
 
