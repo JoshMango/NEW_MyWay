@@ -32,9 +32,28 @@ class App : Application() {
     var dataVersion by mutableIntStateOf(0)
         private set
 
+    /** Unread message counts for the sidebar and inbox tabs. */
+    var unreadAllCount by mutableIntStateOf(0)    // Total unread (DMs + Groups)
+        private set
+    var unreadGroupsCount by mutableIntStateOf(0) // Unread Groups only
+        private set
+
+    /** Pending incoming friend requests — drives the Friends sidebar badge and the Requests tab. */
+    var pendingFriendsCount by mutableIntStateOf(0)
+        private set
+
     private var uid = ""
     private var placesReg: ListenerRegistration? = null
     private var collsReg: ListenerRegistration? = null
+    private var unreadChatsReg: ListenerRegistration? = null
+    private var unreadGroupsReg: ListenerRegistration? = null
+    private var pendingFriendsReg: ListenerRegistration? = null
+
+    private var rawChats = emptyList<PrivateChat>()
+    private var rawGroups = emptyList<Group>()
+    // Chat/group ids the user just opened locally — masked out of the unread count immediately,
+    // before the Firestore "markRead" write has round-tripped back through the snapshot listener.
+    private val locallyRead = mutableSetOf<String>()
 
     override fun onCreate() {
         super.onCreate()
@@ -129,17 +148,56 @@ class App : Application() {
             for (c in list) collections.add(Collection(c.name, c.icon, c.id).apply { locationKeys.addAll(c.keys) })
             dataVersion++
         }
+        unreadChatsReg = PrivateMessages.listenMyChats(uid) { list ->
+            rawChats = list
+            updateUnreadCounts()
+        }
+        unreadGroupsReg = Groups.listenMyGroups(uid) { list ->
+            rawGroups = list
+            updateUnreadCounts()
+        }
+        // Same query FriendsActivity uses for its "Requests" tab: pending requests where I'm the recipient.
+        pendingFriendsReg = Friends.listenIncoming(uid) { list ->
+            pendingFriendsCount = list.size
+        }
+    }
+
+    private fun updateUnreadCounts() {
+        if (uid.isEmpty()) return
+        val unreadDms = rawChats.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
+        val unreadGrps = rawGroups.count { it.isUnread(uid) && !it.isArchived(uid) && it.id !in locallyRead }
+        unreadGroupsCount = unreadGrps
+        unreadAllCount = unreadDms + unreadGrps
+        // Once a snapshot confirms an id is actually read, drop the override — keeps the mask from
+        // permanently hiding a chat that becomes unread again later (e.g. a new incoming message).
+        val stillUnread = (rawChats.filter { it.isUnread(uid) }.map { it.id } +
+                rawGroups.filter { it.isUnread(uid) }.map { it.id }).toSet()
+        locallyRead.retainAll(stillUnread)
+    }
+
+    /** Called the instant a chat/group row is tapped, so the badge decrements immediately instead of
+     *  waiting on the round trip of a Firestore "markRead" write + snapshot listener update. */
+    fun markReadLocally(id: String) {
+        locallyRead += id
+        updateUnreadCounts()
     }
 
     /** Sign-out → drop the listeners and the mirror. */
     fun unbindUser() {
         placesReg?.remove(); collsReg?.remove()
-        placesReg = null; collsReg = null; uid = ""
+        unreadChatsReg?.remove(); unreadGroupsReg?.remove()
+        pendingFriendsReg?.remove()
+        placesReg = null; collsReg = null
+        unreadChatsReg = null; unreadGroupsReg = null
+        pendingFriendsReg = null
+        uid = ""
         clearMirror()
     }
 
     private fun clearMirror() {
         myLocations.clear(); locationNotes.clear(); locationNames.clear(); locationPlaceIds.clear(); collections.clear()
+        unreadAllCount = 0; unreadGroupsCount = 0; pendingFriendsCount = 0
+        rawChats = emptyList(); rawGroups = emptyList(); locallyRead.clear()
         dataVersion++
     }
 

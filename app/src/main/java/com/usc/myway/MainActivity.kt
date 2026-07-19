@@ -517,7 +517,11 @@ class MainActivity : ComponentActivity() {
                 enter = slideInHorizontally { -it },
                 exit = slideOutHorizontally { -it },
                 modifier = Modifier.align(Alignment.TopStart),
-            ) { Sidebar(sidebar, sidebarActions) }
+            ) {
+                sidebar.unreadCount = app.unreadAllCount
+                sidebar.pendingFriendsCount = app.pendingFriendsCount
+                Sidebar(sidebar, sidebarActions)
+            }
 
             Sheets()
             Dialogs()
@@ -1103,6 +1107,7 @@ class MainActivity : ComponentActivity() {
         override fun onProfile() { drawerOpen = false; startActivity(Intent(this@MainActivity, ProfileActivity::class.java)) }
         override fun onFriends() { drawerOpen = false; startActivity(Intent(this@MainActivity, FriendsActivity::class.java)) }
         override fun onMessages() { drawerOpen = false; startActivity(Intent(this@MainActivity, MessagesActivity::class.java)) }
+        override fun onGroups() { drawerOpen = false; startActivity(Intent(this@MainActivity, MessagesActivity::class.java).putExtra("tab", "groups")) }
         override fun onSettings() { drawerOpen = false; startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         override fun onToggleTheme() { toggleTheme() }
         override fun onLogout() { logout() }

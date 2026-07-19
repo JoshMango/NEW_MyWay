@@ -1,5 +1,5 @@
 // Private 1-on-1 messaging layer on Firestore.
-//   private_chats/{chatId}                { users: [a,b], tags: {uid:tag}, lastMsg: string, lastTs: Long }
+//   private_chats/{chatId}                { users: [a,b], tags: {uid:tag}, lastMsg: string, lastTs: Long, reads: {uid:ts} }
 //   private_chats/{chatId}/messages/{mid}   { from, fromTag, text, image, pinLat... ts }
 // chatId is pairId(uidA, uidB) — alphabetical sort of UIDs joined by underscore.
 package com.usc.myway
@@ -18,13 +18,15 @@ data class PrivateChat(
     val lastTs: Long = 0,
     val pinned: Map<String, Boolean> = emptyMap(),
     val archived: Map<String, Boolean> = emptyMap(),
-    val muted: Map<String, Boolean> = emptyMap()
+    val muted: Map<String, Boolean> = emptyMap(),
+    val reads: Map<String, Long> = emptyMap()
 ) {
     fun otherUid(myUid: String) = users.firstOrNull { it != myUid } ?: ""
     fun otherTag(myUid: String) = tags[otherUid(myUid)] ?: "User"
     fun isPinned(uid: String) = pinned[uid] == true
     fun isArchived(uid: String) = archived[uid] == true
     fun isMuted(uid: String) = muted[uid] == true
+    fun isUnread(uid: String) = lastTs > (reads[uid] ?: 0L)
 }
 
 object PrivateMessages {
@@ -33,8 +35,7 @@ object PrivateMessages {
 
     fun pairId(a: String, b: String) = listOf(a, b).sorted().joinToString("_")
 
-    /** List of all my active private chats, ordered by lastTs descending. 
-     *  Note: This requires a composite index (users array-contains + lastTs descending). */
+    /** List of all my active private chats, ordered by lastTs descending. */
     fun listenMyChats(myUid: String, onChange: (List<PrivateChat>) -> Unit): ListenerRegistration =
         db.collection("private_chats").whereArrayContains("users", myUid)
             .orderBy("lastTs", Query.Direction.DESCENDING)
@@ -54,6 +55,8 @@ object PrivateMessages {
                     val archived = d.get("archived") as? Map<String, Boolean> ?: emptyMap()
                     @Suppress("UNCHECKED_CAST")
                     val muted = d.get("muted") as? Map<String, Boolean> ?: emptyMap()
+                    @Suppress("UNCHECKED_CAST")
+                    val reads = d.get("reads") as? Map<String, Long> ?: emptyMap()
                     
                     PrivateChat(
                         id = d.id, 
@@ -63,7 +66,8 @@ object PrivateMessages {
                         lastTs = d.getLong("lastTs") ?: 0L,
                         pinned = pinned,
                         archived = archived,
-                        muted = muted
+                        muted = muted,
+                        reads = reads
                     )
                 })
             }
@@ -74,8 +78,12 @@ object PrivateMessages {
             .addOnFailureListener { Log.e("PrivateMessages", "updateMetadata failed", it) }
     }
 
+    /** Read receipt: remember the newest message [uid] has seen in this chat. */
+    fun markRead(chatId: String, uid: String, ts: Long) {
+        db.collection("private_chats").document(chatId).update("reads.$uid", ts)
+    }
+
     fun deleteChat(chatId: String, myUid: String) {
-        // Remove the user from the chat entirely for a local "delete" effect.
         db.collection("private_chats").document(chatId)
             .update("users", com.google.firebase.firestore.FieldValue.arrayRemove(myUid))
             .addOnFailureListener { Log.e("PrivateMessages", "deleteChat failed", it) }

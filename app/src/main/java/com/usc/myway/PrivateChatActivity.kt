@@ -68,9 +68,18 @@ class PrivateChatActivity : ComponentActivity() {
         super.onStart()
         NotificationHub.activeDmId = chatId          // don't notify for the chat I'm reading
         Notifier.clearMessages(this, chatId)         // clear any pending notification for it
-        listeners += PrivateMessages.listenMessages(chatId) { messages = it }
+        listeners += PrivateMessages.listenMessages(chatId) { 
+            messages = it
+            markRead()
+        }
         // Live profile — their new photo/@tag shows in the header the moment they change it.
         listeners += Profiles.listenProfile(otherUid) { otherPhoto = it.photo; if (it.tag.isNotEmpty()) otherTagLive = it.tag }
+    }
+
+    /** I'm looking at the chat → my receipt sits on the newest message. */
+    private fun markRead() {
+        val ts = messages.lastOrNull()?.ts ?: return
+        PrivateMessages.markRead(chatId, uid, ts)
     }
 
     override fun onStop() {

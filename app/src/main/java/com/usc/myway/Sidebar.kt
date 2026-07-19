@@ -4,45 +4,15 @@ package com.usc.myway
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.ExitToApp
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.LightMode
-import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Place
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.WifiTethering
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +37,8 @@ class SidebarState {
     var userTag by mutableStateOf("")
     var userPhoto by mutableStateOf("")
     var userBanner by mutableStateOf("") // "" = teal gradient fallback
+    var unreadCount by mutableIntStateOf(0)
+    var pendingFriendsCount by mutableIntStateOf(0)
 }
 
 /** Callbacks the drawer fires back to the activity. */
@@ -75,6 +47,7 @@ interface SidebarActions {
     fun onWaypoints()
     fun onProfile()
     fun onFriends()
+    fun onGroups()
     fun onMessages()
     fun onSettings()
     fun onToggleTheme()
@@ -94,7 +67,7 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
             // Brand header
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
                 Image(
-                    painterResource(R.drawable.ic_launcher_logo), contentDescription = null,
+                    painterResource(R.drawable.ic_launcher_foreground), contentDescription = null,
                     modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)),
                 )
                 Spacer(Modifier.width(12.dp))
@@ -135,8 +108,8 @@ internal fun Sidebar(state: SidebarState, actions: SidebarActions) {
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SOCIAL")
-                SbItem(Icons.Outlined.Chat, "Messages", actions::onMessages)
-                SbItem(Icons.Outlined.People, "Friends", actions::onFriends)
+                SbItem(Icons.Outlined.Chat, "Messages", actions::onMessages, badgeCount = state.unreadCount)
+                SbItem(Icons.Outlined.People, "Friends", actions::onFriends, badgeCount = state.pendingFriendsCount)
 
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("SETTINGS")
@@ -163,8 +136,9 @@ private fun SectionLabel(text: String) {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SbItem(icon: ImageVector, label: String, onClick: () -> Unit, danger: Boolean = false) {
+private fun SbItem(icon: ImageVector, label: String, onClick: () -> Unit, danger: Boolean = false, badgeCount: Int = 0) {
     val accent = if (danger) Danger else Teal
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick)
@@ -172,7 +146,15 @@ private fun SbItem(icon: ImageVector, label: String, onClick: () -> Unit, danger
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(38.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+            BadgedBox(badge = {
+                if (badgeCount > 0) {
+                    Badge(containerColor = MaterialTheme.colorScheme.error) {
+                        Text(if (badgeCount > 99) "99+" else badgeCount.toString(), fontSize = 10.sp, color = Color.White)
+                    }
+                }
+            }) {
+                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+            }
         }
         Spacer(Modifier.width(14.dp))
         Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium,

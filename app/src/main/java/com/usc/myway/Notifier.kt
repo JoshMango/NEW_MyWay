@@ -86,7 +86,7 @@ object Notifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val n = NotificationCompat.Builder(ctx, channel)
-            .setSmallIcon(R.drawable.ic_launcher_logo)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)   // heads-up (top pop-up) on pre-O

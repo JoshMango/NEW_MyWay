@@ -19,4 +19,5 @@
     <color name="saved_address_color">#b2f2e9</color>
     <color name="divider_color">#e2eff0</color>
     <color name="collection_icon">#e1eded</color>
-    </resources>
+    <color name="ic_launcher_background">#00d48d</color>
+</resources>

@@ -14,6 +14,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -70,6 +71,7 @@ class MessagesActivity : ComponentActivity() {
     private val auth by lazy { FirebaseAuth.getInstance() }
     private val uid get() = auth.currentUser?.uid ?: ""
     private val myTag by lazy { (application as App).getUserTag(uid).ifEmpty { "me" } }
+    private val app get() = application as App
 
     private var chats by mutableStateOf<List<PrivateChat>>(emptyList())
     private var groups by mutableStateOf<List<Group>>(emptyList())
@@ -107,14 +109,14 @@ class MessagesActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun MessagesScreen() {
-        var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+        var selectedTabIndex by rememberSaveable { mutableIntStateOf(if (intent.getStringExtra("tab") == "groups") 1 else 0) }
         var showArchived by rememberSaveable { mutableStateOf(false) }
         var showMenu by remember { mutableStateOf(false) }
         var showNewDM by remember { mutableStateOf(false) }
         var showCreate by remember { mutableStateOf(false) }
         var selectedItem by remember { mutableStateOf<Inbox?>(null) }
         val sheetState = rememberModalBottomSheetState()
-        
+
         val items = remember(chats, groups, selectedTabIndex, showArchived) {
             inbox(archived = showArchived, groupsOnly = selectedTabIndex == 1)
         }
@@ -155,10 +157,32 @@ class MessagesActivity : ComponentActivity() {
                 if (!showArchived) {
                     PrimaryTabRow(selectedTabIndex = selectedTabIndex, containerColor = MaterialTheme.colorScheme.surface) {
                         Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }) {
-                            Text("All", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Medium)
+                            BadgedBox(
+                                badge = {
+                                    if (app.unreadAllCount > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.error) {
+                                            Text(if (app.unreadAllCount > 99) "99+" else app.unreadAllCount.toString(), color = Color.White, fontSize = 10.sp)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            ) {
+                                Text("All", fontWeight = FontWeight.Medium)
+                            }
                         }
                         Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
-                            Text("Groups", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Medium)
+                            BadgedBox(
+                                badge = {
+                                    if (app.unreadGroupsCount > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.error) {
+                                            Text(if (app.unreadGroupsCount > 99) "99+" else app.unreadGroupsCount.toString(), color = Color.White, fontSize = 10.sp)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            ) {
+                                Text("Groups", fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
                 }
@@ -220,6 +244,7 @@ class MessagesActivity : ComponentActivity() {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                 .combinedClickable(
                     onClick = {
+                        app.markReadLocally(dm.chat.id)
                         startActivity(Intent(this@MessagesActivity, PrivateChatActivity::class.java)
                             .putExtra("chatId", dm.chat.id).putExtra("otherUid", dm.otherUid).putExtra("otherTag", tag))
                     },
@@ -231,7 +256,7 @@ class MessagesActivity : ComponentActivity() {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("@$tag", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("@$tag", fontSize = 16.sp, fontWeight = if (dm.chat.isUnread(uid)) FontWeight.ExtraBold else FontWeight.Bold)
                     if (dm.pinned) {
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.PushPin, null, Modifier.size(12.dp), TealDeep)
@@ -241,7 +266,10 @@ class MessagesActivity : ComponentActivity() {
                         Icon(Icons.Outlined.NotificationsOff, null, Modifier.size(12.dp), MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                     }
                 }
-                Preview(dm.chat.lastMsg)
+                Preview(dm.chat.lastMsg, dm.chat.isUnread(uid))
+            }
+            if (dm.chat.isUnread(uid)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Teal))
             }
         }
     }
@@ -254,6 +282,7 @@ class MessagesActivity : ComponentActivity() {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                 .combinedClickable(
                     onClick = {
+                        app.markReadLocally(g.id)
                         startActivity(Intent(this@MessagesActivity, GroupChatActivity::class.java)
                             .putExtra("gid", g.id).putExtra("name", g.name))
                     },
@@ -267,7 +296,7 @@ class MessagesActivity : ComponentActivity() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text(g.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(g.name, fontSize = 16.sp, fontWeight = if (g.isUnread(uid)) FontWeight.ExtraBold else FontWeight.Bold)
                     if (row.pinned) {
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.PushPin, null, Modifier.size(12.dp), TealDeep)
@@ -288,15 +317,19 @@ class MessagesActivity : ComponentActivity() {
                         }
                     }
                 }
-                Preview(g.lastMsg.ifEmpty { "${g.members.size} member${if (g.members.size == 1) "" else "s"}" })
+                Preview(g.lastMsg.ifEmpty { "${g.members.size} member${if (g.members.size == 1) "" else "s"}" }, g.isUnread(uid))
+            }
+            if (g.isUnread(uid)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Teal))
             }
         }
     }
 
     @Composable
-    private fun Preview(text: String) {
+    private fun Preview(text: String, bold: Boolean) {
         if (text.isNotEmpty()) Text(text, fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), maxLines = 1)
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (bold) 1f else 0.7f), maxLines = 1)
     }
 
     @Composable
@@ -304,8 +337,8 @@ class MessagesActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             val title = if (item is Inbox.Dm) "@${item.otherTag}" else (item as Inbox.Grp).g.name
             Text(title, Modifier.padding(16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            
-            ActionItem(if (item.pinned) "Unpin" else "Pin", if (item.pinned) Icons.Outlined.PushPin else Icons.Outlined.PushPin) {
+
+            ActionItem(if (item.pinned) "Unpin" else "Pin", if (item.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin) {
                 if (item is Inbox.Dm) PrivateMessages.updateMetadata(item.id, uid, "pinned", !item.pinned)
                 else Groups.updateMetadata(item.id, uid, "pinned", !item.pinned)
                 onDismiss()

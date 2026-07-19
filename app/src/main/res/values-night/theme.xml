@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Place this file at res/values-night/theme.xml (same filename as your existing res/values/theme.xml).
+     Android automatically swaps to whatever is in a "-night" resource folder when the system is
+     in dark mode, so you don't need any code to detect the setting yourself. -->
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.MyWay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">#00BCD4</item>
@@ -14,10 +18,8 @@
         <item name="android:navigationBarColor">#0097A7</item>
         <item name="android:windowLightStatusBar">false</item>
 
-        <!-- Android 12+ generates a splash screen automatically using the launcher icon inside a
-             container. This makes that container's background follow the phone's system light/dark
-             setting: white in light mode (this file), black in dark mode (see values-night/theme.xml). -->
-        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@android:color/white</item>
+        <!-- The only thing this night variant actually changes vs. the light theme. -->
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@android:color/black</item>
         <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/ic_launcher_foreground</item>
     </style>
 </resources>

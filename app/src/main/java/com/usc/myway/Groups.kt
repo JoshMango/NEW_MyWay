@@ -34,6 +34,7 @@ data class Group(
     fun isPinned(uid: String) = pinned[uid] == true
     fun isArchived(uid: String) = archived[uid] == true
     fun isMuted(uid: String) = muted[uid] == true
+    fun isUnread(uid: String) = lastTs > (reads[uid] ?: 0L)
 }
 
 /** A chat message: text, an image (base64 JPEG), or a shared location pin (pinLat != null). */

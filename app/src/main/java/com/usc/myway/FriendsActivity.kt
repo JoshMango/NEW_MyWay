@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,13 +83,14 @@ class FriendsActivity : ComponentActivity() {
     private val auth by lazy { FirebaseAuth.getInstance() }
     private val uid get() = auth.currentUser?.uid ?: ""
     private val myTag by lazy { (application as App).getUserTag(uid).ifEmpty { "me" } }
+    private val app get() = application as App
     private val s = FriendsState()
 
     private val listeners = mutableListOf<ListenerRegistration>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MyWayTheme { FriendsScreen(s, actions, onBack = { finish() }) } }
+        setContent { MyWayTheme { FriendsScreen(s, actions, app, onBack = { finish() }) } }
     }
 
     // Live listeners while the screen is visible; detach when it isn't.
@@ -179,7 +182,7 @@ interface FriendsActions {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FriendsScreen(s: FriendsState, actions: FriendsActions, onBack: () -> Unit) {
+private fun FriendsScreen(s: FriendsState, actions: FriendsActions, app: App, onBack: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val tabs = listOf("Find", "Requests", "Friends", "Close Friends")
 
@@ -188,7 +191,7 @@ private fun FriendsScreen(s: FriendsState, actions: FriendsActions, onBack: () -
             TopAppBar(
                 title = { Text("Friends", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { 
+                    IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -199,8 +202,25 @@ private fun FriendsScreen(s: FriendsState, actions: FriendsActions, onBack: () -
         Column(Modifier.fillMaxSize().padding(pad)) {
             TabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.surface, contentColor = TealDeep) {
                 tabs.forEachIndexed { i, t ->
-                    val badge = if (i == 1 && s.incoming.isNotEmpty()) " (${s.incoming.size})" else ""
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t + badge, fontWeight = FontWeight.Medium) })
+                    Tab(
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        text = {
+                            if (i == 1) {
+                                BadgedBox(badge = {
+                                    if (app.pendingFriendsCount > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.error) {
+                                            Text(if (app.pendingFriendsCount > 99) "99+" else app.pendingFriendsCount.toString(), color = Color.White, fontSize = 10.sp)
+                                        }
+                                    }
+                                }) {
+                                    Text(t, fontWeight = FontWeight.Medium)
+                                }
+                            } else {
+                                Text(t, fontWeight = FontWeight.Medium)
+                            }
+                        },
+                    )
                 }
             }
             when (tab) {
@@ -334,7 +354,7 @@ private fun CloseFriendsTab(s: FriendsState, actions: FriendsActions) {
             } else {
                 s.friends.filter {
                     it.tag.contains(searchQuery, ignoreCase = true) ||
-                    it.fullName.contains(searchQuery, ignoreCase = true)
+                            it.fullName.contains(searchQuery, ignoreCase = true)
                 }
             }
         }

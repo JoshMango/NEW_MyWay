@@ -110,7 +110,7 @@ class TripLocationService : Service() {
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Sharing your live location")
             .setContentText("With $groupName · tap to open MyWay")
-            .setSmallIcon(R.drawable.ic_launcher_logo)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setContentIntent(open)
             .build()
