@@ -37,8 +37,10 @@ object PrivateMessages {
 
     /** List of all my active private chats, ordered by lastTs descending. */
     fun listenMyChats(myUid: String, onChange: (List<PrivateChat>) -> Unit): ListenerRegistration =
+        // No orderBy: `whereArrayContains` + `orderBy` needs a composite index, and without it the
+        // server listener silently fails (cache still serves your own writes, but remote messages never
+        // arrive). Consumers sort client-side anyway, so ordering here is redundant.
         db.collection("private_chats").whereArrayContains("users", myUid)
-            .orderBy("lastTs", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.e("PrivateMessages", "listenMyChats failed. Ensure index is created: ${err.message}")
