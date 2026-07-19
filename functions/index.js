@@ -7,9 +7,12 @@
 // so it ignores the push when the app is in the foreground.
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { AccessToken } = require("livekit-server-sdk");
 
 initializeApp();
 const db = getFirestore();
@@ -141,6 +144,30 @@ exports.tripScheduleTick = onSchedule("every 5 minutes", async () => {
     }
   }));
 });
+
+// ── Voice/video calling (LiveKit) ───────────────────────────────────────────────
+// The app connects to a LiveKit room to carry the actual audio; this callable just mints the
+// short-lived access token to join it. Secret stays server-side (repo is public). Set with:
+//   firebase functions:secrets:set LIVEKIT_API_KEY
+//   firebase functions:secrets:set LIVEKIT_API_SECRET
+//   firebase functions:secrets:set LIVEKIT_URL      (your wss://<project>.livekit.cloud)
+const LIVEKIT_API_KEY = defineSecret("LIVEKIT_API_KEY");
+const LIVEKIT_API_SECRET = defineSecret("LIVEKIT_API_SECRET");
+const LIVEKIT_URL = defineSecret("LIVEKIT_URL");
+
+exports.livekitToken = onCall(
+  { secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL] },
+  async (req) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "Sign in to start a call.");
+    const room = String((req.data && req.data.room) || "").trim();
+    if (!room) throw new HttpsError("invalid-argument", "room is required.");
+    // Identity = the caller's uid, so LiveKit participants map 1:1 to app users.
+    const at = new AccessToken(LIVEKIT_API_KEY.value(), LIVEKIT_API_SECRET.value(),
+      { identity: req.auth.uid, ttl: "1h" });
+    at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
+    return { token: await at.toJwt(), url: LIVEKIT_URL.value() };
+  },
+);
 
 // ponytail: self-check for the reminder branch logic — `node index.js`. No framework.
 if (require.main === module) {
