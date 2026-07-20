@@ -36,12 +36,16 @@ object Profiles {
 
     /** Live @tag + name + photo for a user — so chat rows/headers/cards update the moment they change. */
     data class Live(val tag: String, val photo: String, val name: String = "")
-    fun listenProfile(uid: String, onChange: (Live) -> Unit): ListenerRegistration =
-        db.collection("users").document(uid).addSnapshotListener { d, _ ->
+    fun listenProfile(uid: String, onChange: (Live) -> Unit): ListenerRegistration {
+        // Guard blank uids — Firestore rejects an empty document path ("users/") with an
+        // IllegalArgumentException, which would crash any composable that renders an unknown user.
+        if (uid.isBlank()) return ListenerRegistration { }
+        return db.collection("users").document(uid).addSnapshotListener { d, _ ->
             if (d != null) onChange(Live(
                 d.getString("tag") ?: "", d.getString("photo") ?: "",
                 "${d.getString("firstName") ?: ""} ${d.getString("lastName") ?: ""}".trim()))
         }
+    }
 
     /** Live banner (its own doc) — so a profile card reflects a banner change immediately. */
     fun listenBanner(uid: String, onChange: (String) -> Unit): ListenerRegistration =

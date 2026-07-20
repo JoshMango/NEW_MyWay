@@ -63,6 +63,11 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-functions")   // livekitToken callable (shared backend)
+
+    // Voice/video calls — LiveKit Cloud SFU (shared with iOS). Compose components for VideoTrackView.
+    implementation("io.livekit:livekit-android:2.26.0")
+    implementation("io.livekit:livekit-android-compose-components:2.4.0")
 
     implementation(platform(libs.compose.bom))
     implementation(libs.androidx.activity.compose)

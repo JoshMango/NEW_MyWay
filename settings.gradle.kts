@@ -19,6 +19,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }   // LiveKit's audioswitch fork (com.github.davidliu)
     }
 }
 

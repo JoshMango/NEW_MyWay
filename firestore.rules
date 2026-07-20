@@ -120,9 +120,15 @@ service cloud.firestore {
     // so the id names both participants. create keys off the id (doc doesn't exist yet); read/update/
     // delete key off from/to so the "incoming calls where to == me" query works and only the pair can act.
     match /calls/{callId} {
-      allow create:              if signedIn() && request.auth.uid in callId.split('_');
+      allow create: if signedIn() && request.auth.uid in callId.split('_');
+      // Read/update/delete: the id already names both participants, so authorize off the id — this also
+      // works when the doc doesn't exist yet (the caller's listener races its own create write, and a
+      // resource.data-based rule would deny on the null doc and kill the listener). The resource.data.to
+      // branch is what makes the "incoming calls where to == me" collection query provably safe.
       allow read, update, delete: if signedIn()
-                                  && (request.auth.uid == resource.data.from || request.auth.uid == resource.data.to);
+                                  && (request.auth.uid in callId.split('_')
+                                      || request.auth.uid == resource.data.to
+                                      || request.auth.uid == resource.data.from);
     }
 
     // Group calls — shared room keyed by gid (= LiveKit room). Any group member may join/leave/read.

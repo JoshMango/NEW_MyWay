@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.outlined.AddAPhoto
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -114,6 +115,7 @@ private class ChatState {
     var friends by mutableStateOf<List<UserHit>>(emptyList())
     var tripMembers by mutableStateOf<List<Trip.Member>>(emptyList())
     var plan by mutableStateOf<Trip.TripPlan?>(null)   // shared objective queue (built while scheduling)
+    var callParticipants by mutableStateOf<List<String>>(emptyList())   // uids currently in the group call
 }
 
 class GroupChatActivity : ComponentActivity() {
@@ -159,6 +161,7 @@ class GroupChatActivity : ComponentActivity() {
                     onOpenLive = { m -> startActivity(Intent(this, LiveLocationActivity::class.java).apply {
                         putExtra("uid", m.liveFrom); putExtra("name", "@${m.fromTag}")
                     }) },
+                    onGroupCall = { startActivity(CallActivity.group(this, gid, s.group?.name ?: fallbackName, false)) },
                     actions = groupActions,
                 )
             }
@@ -173,6 +176,7 @@ class GroupChatActivity : ComponentActivity() {
         listeners += Friends.listenFriends(uid) { s.friends = it }
         listeners += Trip.listenMembers(gid) { s.tripMembers = it }
         listeners += Trip.listenPlan(gid) { s.plan = it }
+        listeners += Calls.listenGroupCall(gid) { s.callParticipants = it }
         listeners += Groups.listenGroup(gid) { g ->
             // Group deleted, or I'm no longer a member → close the screen.
             if (g == null || uid !in g.members) finish() else s.group = g
@@ -278,6 +282,7 @@ private fun ChatScreen(
     onEndTrip: () -> Unit,
     onOpenPin: (GroupMessage) -> Unit,
     onOpenLive: (GroupMessage) -> Unit,
+    onGroupCall: () -> Unit,
     actions: GroupActions,
 ) {
     var showInfo by remember { mutableStateOf(false) }
@@ -302,6 +307,11 @@ private fun ChatScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = onGroupCall, enabled = g != null) {
+                        Icon(Icons.Filled.Call, contentDescription = "Group call")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -310,6 +320,7 @@ private fun ChatScreen(
             // iPhone-call-style banner — only while a trip is ongoing. Starting a trip lives in the info menu.
             if (g?.tripActive == true) TripBar(s.tripMembers, myUid, onJoinTrip, onLeaveTrip, onEndTrip)
             else g?.tripScheduledAt?.let { ScheduledTripBar(it) { showInfo = true } }
+            if (s.callParticipants.isNotEmpty()) GroupCallBar(s.callParticipants.size, onGroupCall)
             MessageList(s.messages, myUid, g?.reads ?: emptyMap(), g?.tags ?: emptyMap(),
                 onOpenPin, onOpenLive, { fullImage = it }, onUnsend, onEdit, Modifier.weight(1f))
             MessageInput(onSend, onSendImage)
@@ -342,6 +353,23 @@ private fun ScheduledTripBar(startAtMillis: Long, onTap: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Text("Trip scheduled for ${stamp(startAtMillis)}", fontSize = 13.sp, fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** "Call in progress" banner — tap to join the ongoing group call. */
+@Composable
+private fun GroupCallBar(count: Int, onJoin: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Teal.copy(alpha = 0.15f)).clickable(onClick = onJoin)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Call, contentDescription = null, tint = TealDeep, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Call in progress · $count on the call", fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.weight(1f))
+        Text("Join", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TealDeep)
     }
 }
 

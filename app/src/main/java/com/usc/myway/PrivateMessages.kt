@@ -146,6 +146,23 @@ object PrivateMessages {
         batch.commit().addOnFailureListener { Log.e("PrivateMessages", "sendMessage failed", it) }
     }
 
+    /** Post a system notice (e.g. a call log) into a DM. Ensures the chat doc's users/tags exist and
+     *  refreshes the inbox preview, mirroring sendMessage. Rendered as a centered notice, not a bubble. */
+    fun postSystem(chatId: String, aUid: String, aTag: String, bUid: String, bTag: String, text: String) {
+        if (text.isBlank()) return
+        val ts = System.currentTimeMillis()
+        val batch = db.batch()
+        val chatRef = db.collection("private_chats").document(chatId)
+        batch.set(chatRef, mapOf(
+            "users" to listOf(aUid, bUid).sorted(),
+            "tags" to mapOf(aUid to aTag, bUid to bTag),
+            "lastMsg" to text, "lastTs" to ts,
+        ), SetOptions.merge())
+        batch.set(chatRef.collection("messages").document(),
+            mapOf("from" to "system", "fromTag" to "", "text" to text, "system" to true, "ts" to ts))
+        batch.commit().addOnFailureListener { Log.e("PrivateMessages", "postSystem failed", it) }
+    }
+
     /** Drop a live-location card into a DM so the recipient can tap to follow the sharer's map. */
     fun postLiveShare(chatId: String, fromUid: String, fromTag: String, otherUid: String, otherTag: String) {
         val ts = System.currentTimeMillis()

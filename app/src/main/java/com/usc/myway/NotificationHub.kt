@@ -4,6 +4,7 @@
 package com.usc.myway
 
 import android.content.Context
+import android.content.Intent
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -29,6 +30,12 @@ object NotificationHub {
     private val seenReqs = HashSet<String>()                        // friend-request ids already notified for
     private var reqSeeded = false
 
+    private var callReg: ListenerRegistration? = null
+    private var ringingCallId: String? = null                       // the call we've already surfaced a ring for
+    private var callsSeeded = false                                 // skip a call already ringing when we attached
+    /** Set by CallActivity while I'm in a call, so we don't re-ring for it. */
+    @Volatile var activeCallId: String? = null
+
     /** Set by GroupChatActivity while a group chat is open, so we don't notify for the chat you're reading. */
     @Volatile var activeChatGid: String? = null
 
@@ -46,6 +53,21 @@ object NotificationHub {
         myGroupsReg = Groups.listenMyGroups(myUid) { groups -> sync(groups) }
         chatsReg = PrivateMessages.listenMyChats(myUid) { chats -> syncChats(chats) }
         reqReg = Friends.listenIncoming(myUid) { reqs -> syncRequests(reqs) }
+        callReg = Calls.listenIncoming(myUid) { call -> onIncomingCall(call) }
+    }
+
+    /** Foreground-only ringing: a call addressed to me flips to "ringing" → launch the ring screen + alert.
+     *  When it clears (accepted → "active", or deleted) the query returns null and we reset. */
+    private fun onIncomingCall(call: Calls.IncomingCall?) {
+        // A call already ringing when we attach is stale (foreground-only: we weren't here to answer it,
+        // and it would otherwise shadow future real calls). Clear it — the caller gets a "missed" log.
+        if (!callsSeeded) { callsSeeded = true; call?.let { Calls.end(it.callId) }; return }
+        if (call == null) { ringingCallId = null; return }
+        if (call.callId == ringingCallId || call.callId == activeCallId) return
+        ringingCallId = call.callId
+        val c = ctx ?: return
+        Notifier.incomingCall(c, call.fromTag, call.video, CallActivity.dmIncoming(c, call))
+        c.startActivity(CallActivity.dmIncoming(c, call).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
     }
 
     fun stop() {
@@ -58,6 +80,7 @@ object NotificationHub {
         chatLastId.clear(); chatSeeded.clear()
         reqReg?.remove(); reqReg = null
         seenReqs.clear(); reqSeeded = false
+        callReg?.remove(); callReg = null; ringingCallId = null; callsSeeded = false
         uid = ""
     }
 

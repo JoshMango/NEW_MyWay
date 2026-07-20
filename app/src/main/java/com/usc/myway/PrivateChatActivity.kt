@@ -19,6 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -102,7 +105,16 @@ class PrivateChatActivity : ComponentActivity() {
                             Text("@$tag", fontWeight = FontWeight.Bold)
                         }
                     },
-                    navigationIcon = { IconButton(onClick = { finish() }) { Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold) } }
+                    navigationIcon = { IconButton(onClick = { finish() }) { Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold) } },
+                    actions = {
+                        val tag = otherTagLive.ifEmpty { otherTag }
+                        IconButton(onClick = { startActivity(CallActivity.dmOutgoing(this@PrivateChatActivity, otherUid, tag, otherPhoto, false)) }) {
+                            Icon(Icons.Filled.Call, contentDescription = "Voice call")
+                        }
+                        IconButton(onClick = { startActivity(CallActivity.dmOutgoing(this@PrivateChatActivity, otherUid, tag, otherPhoto, true)) }) {
+                            Icon(Icons.Filled.Videocam, contentDescription = "Video call")
+                        }
+                    },
                 )
             }
         ) { pad ->
@@ -154,6 +166,15 @@ class PrivateChatActivity : ComponentActivity() {
     private fun MessageBubble(m: GroupMessage, mine: Boolean, photo: String, showAvatar: Boolean, isLast: Boolean) {
         var showMenu by remember(m.id) { mutableStateOf(false) }
         var showEdit by remember(m.id) { mutableStateOf(false) }
+
+        if (m.system) {
+            // Centered notice (call logs, etc.) — same look as the group chat's system messages.
+            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+                Text(m.text, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            }
+            return
+        }
 
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
             if (!mine) {

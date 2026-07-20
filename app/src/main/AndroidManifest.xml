@@ -8,6 +8,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Voice/video calls (LiveKit) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -60,6 +69,14 @@
         <activity
             android:name=".SharedPinActivity"
             android:exported="false" />
+        <!-- Voice/video call screen. singleTask so a second call intent reuses it; show over lockscreen
+             so an incoming-call ring surfaces even when the phone is locked (foreground-only per scope). -->
+        <activity
+            android:name=".CallActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
         <!-- Fixed: Cropper activity must have a theme with an Action Bar for the Save menu to show -->
         <activity

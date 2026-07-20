@@ -87,9 +87,11 @@ private fun applyExifRotation(resolver: ContentResolver, uri: Uri, bmp: Bitmap):
 @Composable
 fun LiveAvatar(uid: String, fallback: String, size: Dp = 40.dp) {
     var photo by remember(uid) { mutableStateOf("") }
-    androidx.compose.runtime.DisposableEffect(uid) {
-        val reg = Profiles.listenProfile(uid) { photo = it.photo }
-        onDispose { reg.remove() }
+    if (uid.isNotBlank()) {
+        androidx.compose.runtime.DisposableEffect(uid) {
+            val reg = Profiles.listenProfile(uid) { photo = it.photo }
+            onDispose { reg.remove() }
+        }
     }
     AvatarCircle(photo = photo, fallback = fallback, size = size)
 }

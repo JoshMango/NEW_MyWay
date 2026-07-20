@@ -48,6 +48,13 @@ object Notifier {
         post(ctx, CH_TRIPS, ("trip:$gid").hashCode(), "Trip started",
             "A trip just started in $groupName", NotificationCompat.CATEGORY_EVENT, groupChatIntent(ctx, gid, groupName))
 
+    /** Heads-up for an incoming 1:1 call (fallback alert; the ring screen is auto-launched too). Tapping
+     *  it opens the ring screen. */
+    fun incomingCall(ctx: Context, fromTag: String, video: Boolean, tap: Intent) =
+        post(ctx, CH_TRIPS, ("call:$fromTag").hashCode(),
+            "Incoming ${if (video) "video " else ""}call", "@$fromTag is calling…",
+            NotificationCompat.CATEGORY_CALL, tap.apply { flags = TAP_FLAGS })
+
     /** Scheduled-trip reminder (day-before / few-mins-before); [body] copy comes from the server. */
     fun tripScheduled(ctx: Context, gid: String, groupName: String, body: String) =
         post(ctx, CH_TRIPS, ("tripsched:$gid").hashCode(), groupName, body,
